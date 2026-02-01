@@ -1,72 +1,104 @@
 from django.db import models
-from users.models import Object  # подключаем модель Object
-from django.utils import timezone
+from common.models import AuditMixin
 
-# -----------------------
-# Названия инструментов
-# -----------------------
+
+class ToolStatus(models.TextChoices):
+    """Статусы инструмента."""
+    IN_STOCK = 'in_stock', 'В наличии'
+    IN_WORK = 'in_work', 'В работе'
+    TRANSFERRED = 'transferred', 'Передан'
+    WRITTEN_OFF = 'written_off', 'Списан'
+
+
 class ToolName(models.Model):
-    """
-    Тип или название инструмента.
-    Примеры: Отвёртка, Перфоратор, Шуруповёрт.
-    """
-    name = models.CharField(max_length=255, unique=True)
+    """Справочник названий инструментов."""
+    name = models.CharField(max_length=255, unique=True, verbose_name='Название')
+
+    class Meta:
+        verbose_name = 'Название инструмента'
+        verbose_name_plural = 'Названия инструментов'
+        ordering = ['name']
 
     def __str__(self):
         return self.name
 
 
-# -----------------------
-# Статусы инструментов
-# -----------------------
-class Status(models.Model):
-    """
-    Статус инструмента.
-    Примеры: Новый, Рабочий, Сломан, Списан.
-    """
-    name = models.CharField(max_length=100, unique=True)
+class Tool(AuditMixin):
+    """Инструмент."""
+    tool_name = models.ForeignKey(
+        ToolName,
+        on_delete=models.PROTECT,
+        related_name='tools',
+        verbose_name='Название'
+    )
+    inventory_number = models.CharField(
+        max_length=255,
+        unique=True,
+        verbose_name='Инвентарный номер'
+    )
+    qr_code = models.CharField(
+        max_length=255,
+        unique=True,
+        verbose_name='QR-код'
+    )
+    photo = models.ImageField(
+        upload_to='tools/',
+        null=True,
+        blank=True,
+        verbose_name='Фото инструмента'
+    )
+    current_object = models.ForeignKey(
+        'objects.ConstructionObject',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tools',
+        verbose_name='Текущий объект'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ToolStatus.choices,
+        default=ToolStatus.IN_STOCK,
+        verbose_name='Статус'
+    )
 
-    def __str__(self):
-        return self.name
-
-
-# -----------------------
-# Основная модель инструмента
-# -----------------------
-class Tool(models.Model):
-    """
-    Инструмент, принадлежащий системе учёта.
-    """
-    inventory_number = models.CharField(max_length=255, unique=True)
-    tool_name = models.ForeignKey(ToolName, on_delete=models.PROTECT, related_name='tools')
-    qr_code_value = models.CharField(max_length=255, unique=True)
-    current_object = models.ForeignKey(Object, on_delete=models.SET_NULL, null=True, blank=True, related_name='tools')
-    status = models.ForeignKey(Status, on_delete=models.PROTECT, related_name='tools')
-    photo = models.ImageField(upload_to='tools/', null=True, blank=True)
-    
-    # Дополнительная служебная информация
-    description = models.TextField(blank=True)  # можно описывать назначение или особенности инструмента
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        verbose_name = 'Инструмент'
+        verbose_name_plural = 'Инструменты'
+        ordering = ['inventory_number']
 
     def __str__(self):
         return f"{self.tool_name.name} ({self.inventory_number})"
 
 
-# -----------------------
-# Списание инструмента
-# -----------------------
-class WrittenOffTool(models.Model):
-    """
-    История списания сломанных инструментов.
-    """
-    tool = models.OneToOneField(Tool, on_delete=models.CASCADE, related_name='written_off')
-    broken_photo = models.ImageField(upload_to='written_off_tools/')  # фото сломанного инструмента
-    qr_photo = models.ImageField(upload_to='written_off_tools/qr/')   # фото QR-кода (если нужен скан)
-    description = models.TextField(help_text="Описание как и почему инструмент сломался")
-    date = models.DateTimeField(default=timezone.now)
-    reported_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
-                                    related_name='reported_written_off_tools')
+class ToolTransferHistory(AuditMixin):
+    """История перемещений инструмента между объектами."""
+    tool = models.ForeignKey(
+        Tool,
+        on_delete=models.CASCADE,
+        related_name='transfer_history',
+        verbose_name='Инструмент'
+    )
+    from_object = models.ForeignKey(
+        'objects.ConstructionObject',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tool_transfers_from',
+        verbose_name='Объект-отправитель'
+    )
+    to_object = models.ForeignKey(
+        'objects.ConstructionObject',
+        on_delete=models.PROTECT,
+        related_name='tool_transfers_to',
+        verbose_name='Объект-получатель'
+    )
+    transfer_date = models.DateTimeField(auto_now_add=True, verbose_name='Дата перемещения')
+
+    class Meta:
+        verbose_name = 'История перемещения инструмента'
+        verbose_name_plural = 'История перемещений инструментов'
+        ordering = ['-transfer_date']
 
     def __str__(self):
-        return f"{self.tool} - списан ({self.date.strftime('%Y-%m-%d')})"
+        return f"{self.tool} -> {self.to_object} ({self.transfer_date.strftime('%Y-%m-%d')})"

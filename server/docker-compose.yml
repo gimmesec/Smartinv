@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: bttrack_db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-bttrack}
+      MYSQL_USER: ${DB_USER:-bttrack_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-bttrack_password}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      - bttrack_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  bttrack_network:
+    driver: bridge

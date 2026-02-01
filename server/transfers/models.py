@@ -1,36 +1,64 @@
 from django.db import models
 from django.utils import timezone
-from users.models import User, Object
-from tools.models import Tool
+from common.models import AuditMixin
 
-# -----------------------
-# Статусы запроса передачи инструмента
-# -----------------------
-class RequestStatus(models.Model):
-    """
-    Статусы запроса на передачу инструмента.
-    Примеры: Новый, Одобрен, Отклонён, Выполнен.
-    """
-    name = models.CharField(max_length=100, unique=True)
+
+class TransferStatus(models.TextChoices):
+    """Статусы передачи инструмента."""
+    CREATED = 'created', 'Создан'
+    CONFIRMED = 'confirmed', 'Подтверждён'
+    REJECTED = 'rejected', 'Отклонён'
+    COMPLETED = 'completed', 'Выполнен'
+
+
+class Transfer(AuditMixin):
+    """Передача инструмента между объектами."""
+    tool = models.ForeignKey(
+        'tools.Tool',
+        on_delete=models.PROTECT,
+        related_name='transfers',
+        verbose_name='Инструмент'
+    )
+    from_object = models.ForeignKey(
+        'objects.ConstructionObject',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transfers_from',
+        verbose_name='Объект-отправитель'
+    )
+    to_object = models.ForeignKey(
+        'objects.ConstructionObject',
+        on_delete=models.PROTECT,
+        related_name='transfers_to',
+        verbose_name='Объект-получатель'
+    )
+    foreman = models.ForeignKey(
+        'users.User',
+        on_delete=models.PROTECT,
+        related_name='initiated_transfers',
+        verbose_name='Бригадир, инициировавший запрос',
+        limit_choices_to={'role': 'foreman'}
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=TransferStatus.choices,
+        default=TransferStatus.CREATED,
+        verbose_name='Статус'
+    )
+    created_at = models.DateTimeField(default=timezone.now, verbose_name='Дата создания')
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата выполнения')
+
+    class Meta:
+        verbose_name = 'Передача инструмента'
+        verbose_name_plural = 'Передачи инструментов'
+        ordering = ['-created_at']
 
     def __str__(self):
-        return self.name
+        return f"{self.tool} -> {self.to_object} ({self.get_status_display()})"
 
-
-# -----------------------
-# Заявка на передачу инструмента
-# -----------------------
-class ToolRequest(models.Model):
-    """
-    Заявка на передачу инструмента между объектами.
-    """
-    tool = models.ForeignKey(Tool, on_delete=models.PROTECT, related_name='tool_requests')
-    from_object = models.ForeignKey(Object, on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_requests_from')
-    to_object = models.ForeignKey(Object, on_delete=models.PROTECT, related_name='tool_requests_to')
-    requester = models.ForeignKey(User, on_delete=models.PROTECT, related_name='tool_requests_requester')
-    approver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_requests_approver')
-    status = models.ForeignKey(RequestStatus, on_delete=models.PROTECT, related_name='tool_requests')
-    created_at = models.DateTimeField(default=timezone.now)
-
-    def __str__(self):
-        return f"{self.tool} запрос от {self.requester} на {self.to_object}"
+    def save(self, *args, **kwargs):
+        """Автоматически устанавливаем дату выполнения при завершении передачи."""
+        if self.status == TransferStatus.COMPLETED and not self.completed_at:
+            self.completed_at = timezone.now()
+        super().save(*args, **kwargs)
