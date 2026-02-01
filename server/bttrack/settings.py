@@ -183,12 +183,4 @@ SPECTACULAR_SETTINGS = {
         "filter": True,
     },
     "SWAGGER_UI_FAVICON_HREF": "/static/favicon.ico",
-    "REDOC_UI_SETTINGS": {
-        "hideDownloadButton": False,
-        "hideHostname": False,
-        "hideSingleRequestTimeTab": False,
-        "expandResponses": "200,201",
-        "pathInMiddlePanel": True,
-        "jsonSampleExpandLevel": 2,
-    },
 }
