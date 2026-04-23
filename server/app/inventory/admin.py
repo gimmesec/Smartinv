@@ -3,7 +3,6 @@ from django.contrib import admin, messages
 from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.urls import path
-from django.utils.html import format_html
 
 from .models import (
     Asset,
@@ -96,9 +95,10 @@ class WriteOffActAdmin(admin.ModelAdmin):
 
 @admin.register(OneCExchangeLog)
 class OneCExchangeLogAdmin(admin.ModelAdmin):
-    list_display = ("id", "direction", "status", "created_at", "xml_import_link")
+    list_display = ("id", "direction", "status", "created_at")
     list_filter = ("direction", "status")
     readonly_fields = ("payload", "response", "error_message", "created_at", "updated_at")
+    change_list_template = "admin/inventory/onecexchangelog/change_list.html"
 
     def get_urls(self):
         urls = super().get_urls()
@@ -116,13 +116,18 @@ class OneCExchangeLogAdmin(admin.ModelAdmin):
         ]
         return custom_urls + urls
 
-    def xml_import_link(self, obj):
-        return format_html(
-            '<a class="button" href="import-xml/">Импорт XML</a>&nbsp;'
-            '<a class="button" href="export-xml/">Экспорт XML</a>'
-        )
+    def has_add_permission(self, request):
+        # Logs are created automatically during import/export.
+        return False
 
-    xml_import_link.short_description = "Импорт XML"
+    def has_change_permission(self, request, obj=None):
+        # Keep log entries read-only in admin.
+        if obj is None:
+            return True
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
     def import_xml_view(self, request):
         form = XMLImportForm(request.POST or None, request.FILES or None)
