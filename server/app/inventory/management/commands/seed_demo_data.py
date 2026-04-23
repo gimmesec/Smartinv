@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -36,6 +37,7 @@ class Command(BaseCommand):
         entities = self._seed_legal_entities()
         locations_map = self._seed_locations(entities)
         employees_map = self._seed_employees(entities)
+        self._seed_employee_users(employees_map)
         assets = self._seed_assets(categories, entities, locations_map, employees_map, now)
         self._seed_inventory(entities, locations_map, assets, now)
         self._seed_transfers(locations_map, employees_map, assets, now)
@@ -203,6 +205,27 @@ class Command(BaseCommand):
                 )
                 assets.append(asset)
         return assets
+
+    def _seed_employee_users(self, employees_map):
+        user_model = get_user_model()
+        for employees in employees_map.values():
+            if not employees:
+                continue
+            employee = employees[0]
+            username = f"emp_{employee.id}"
+            user, _ = user_model.objects.get_or_create(
+                username=username,
+                defaults={
+                    "email": f"{username}@smartinv.local",
+                    "is_staff": False,
+                    "is_superuser": False,
+                },
+            )
+            user.set_password("employee12345")
+            user.save(update_fields=["password"])
+            if employee.user_id != user.id:
+                employee.user = user
+                employee.save(update_fields=["user", "updated_at"])
 
     def _seed_inventory(self, entities, locations_map, assets, now):
         for entity in entities:

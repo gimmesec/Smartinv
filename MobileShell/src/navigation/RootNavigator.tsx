@@ -2,8 +2,9 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import React, { useState } from "react";
 import { ActivityIndicator, Pressable, SafeAreaView, Text } from "react-native";
-import { AdminScreen } from "../features/admin/AdminScreen";
+import { AdminCreateAssetScreen } from "../features/assets/AdminCreateAssetScreen";
 import { AssetsScreen } from "../features/assets/AssetsScreen";
+import { MyResponsibleAssetsScreen } from "../features/assets/MyResponsibleAssetsScreen";
 import { useAuth } from "../features/auth/AuthContext";
 import { LoginScreen } from "../features/auth/LoginScreen";
 import { InventoryScanScreen } from "../features/inventory/InventoryScanScreen";
@@ -22,7 +23,7 @@ function InventoryEntryScreen() {
 }
 
 function MainTabs() {
-  const { user, logout } = useAuth();
+  const { logout, user } = useAuth();
   const isAdmin = !!user?.is_admin;
 
   return (
@@ -33,16 +34,49 @@ function MainTabs() {
         tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textSecondary,
+        headerRightContainerStyle: { paddingRight: 12 },
         headerRight: () => (
-          <Pressable onPress={logout}>
+          <Pressable onPress={logout} style={{ paddingHorizontal: 6, paddingVertical: 4 }} hitSlop={8}>
             <Text style={{ color: colors.accent, fontWeight: "700" }}>Выйти</Text>
           </Pressable>
         ),
       }}
     >
-      <Tabs.Screen name="Assets" component={AssetsScreen} options={{ title: "Активы" }} />
-      <Tabs.Screen name="Inventory" component={InventoryEntryScreen} options={{ title: "Инвентаризация" }} />
-      {isAdmin ? <Tabs.Screen name="Admin" component={AdminScreen} options={{ title: "Админ" }} /> : null}
+      <Tabs.Screen
+        name="Assets"
+        component={AssetsScreen}
+        options={{
+          title: "Активы",
+          tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>📦</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="Inventory"
+        component={InventoryEntryScreen}
+        options={{
+          title: "Инвентаризация",
+          tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>📋</Text>,
+        }}
+      />
+      {isAdmin ? (
+        <Tabs.Screen
+          name="CreateAsset"
+          component={AdminCreateAssetScreen}
+          options={{
+            title: "Добавить актив",
+            tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>➕</Text>,
+          }}
+        />
+      ) : (
+        <Tabs.Screen
+          name="MyResponsible"
+          component={MyResponsibleAssetsScreen}
+          options={{
+            title: "Ответственность",
+            tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>👤</Text>,
+          }}
+        />
+      )}
     </Tabs.Navigator>
   );
 }

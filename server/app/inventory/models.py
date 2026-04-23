@@ -51,6 +51,13 @@ class AssetCategory(TimeStampedModel):
 
 
 class Employee(TimeStampedModel):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="employee_profile",
+    )
     full_name = models.CharField(max_length=255)
     phone = models.CharField(max_length=32, blank=True)
     position = models.CharField(max_length=128, blank=True)

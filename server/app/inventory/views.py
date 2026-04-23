@@ -1,8 +1,7 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
-from django.contrib.auth import get_user_model
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import serializers
@@ -34,14 +33,56 @@ from .serializers import (
 from .services import assess_inventory_item_with_ai, export_to_1c_xml, import_from_1c_xml
 
 
+def get_employee_for_user(user):
+    if not user or not user.is_authenticated:
+        return None
+    return Employee.objects.select_related("legal_entity").filter(user=user).first()
+
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return True
+        user = request.user
+        return bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
+
+
 class LegalEntityViewSet(viewsets.ModelViewSet):
-    queryset = LegalEntity.objects.all().order_by("-created_at")
     serializer_class = LegalEntitySerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        queryset = LegalEntity.objects.all().order_by("-created_at")
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return queryset
+        employee = get_employee_for_user(user)
+        if not employee:
+            return queryset.none()
+        return queryset.filter(id=employee.legal_entity_id)
 
 
 class LocationViewSet(viewsets.ModelViewSet):
-    queryset = Location.objects.select_related("legal_entity", "parent").all().order_by("-created_at")
     serializer_class = LocationSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        queryset = Location.objects.select_related("legal_entity", "parent").all().order_by("-created_at")
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            employee = get_employee_for_user(user)
+            if not employee:
+                return queryset.none()
+            queryset = queryset.filter(legal_entity_id=employee.legal_entity_id)
+        legal_entity_id = self.request.query_params.get("legal_entity")
+        parent_id = self.request.query_params.get("parent")
+        if legal_entity_id:
+            queryset = queryset.filter(legal_entity_id=legal_entity_id)
+        if parent_id == "null":
+            queryset = queryset.filter(parent__isnull=True)
+        elif parent_id:
+            queryset = queryset.filter(parent_id=parent_id)
+        return queryset
 
 
 class AssetCategoryViewSet(viewsets.ModelViewSet):
@@ -50,17 +91,55 @@ class AssetCategoryViewSet(viewsets.ModelViewSet):
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
-    queryset = Employee.objects.select_related("legal_entity").all().order_by("full_name")
     serializer_class = EmployeeSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        queryset = Employee.objects.select_related("legal_entity", "user").all().order_by("full_name")
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return queryset
+        employee = get_employee_for_user(user)
+        if not employee:
+            return queryset.none()
+        return queryset.filter(legal_entity_id=employee.legal_entity_id)
 
 
 class AssetViewSet(viewsets.ModelViewSet):
-    queryset = (
-        Asset.objects.select_related("legal_entity", "location", "category", "responsible_employee")
-        .all()
-        .order_by("-created_at")
-    )
     serializer_class = AssetSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        queryset = (
+            Asset.objects.select_related("legal_entity", "location", "category", "responsible_employee")
+            .all()
+            .order_by("-created_at")
+        )
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            employee = get_employee_for_user(user)
+            if not employee:
+                return queryset.none()
+            queryset = queryset.filter(legal_entity_id=employee.legal_entity_id)
+
+        legal_entity_id = self.request.query_params.get("legal_entity")
+        location_id = self.request.query_params.get("location")
+        responsible_employee_id = self.request.query_params.get("responsible_employee")
+        if legal_entity_id:
+            queryset = queryset.filter(legal_entity_id=legal_entity_id)
+        if location_id:
+            queryset = queryset.filter(location_id=location_id)
+        if responsible_employee_id:
+            queryset = queryset.filter(responsible_employee_id=responsible_employee_id)
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="my-responsible")
+    def my_responsible(self, request):
+        employee = get_employee_for_user(request.user)
+        if not employee:
+            return Response([])
+        queryset = self.get_queryset().filter(responsible_employee_id=employee.id)
+        return Response(self.get_serializer(queryset, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="write-off")
     def write_off(self, request, pk=None):
@@ -87,13 +166,31 @@ class AssetViewSet(viewsets.ModelViewSet):
 
 
 class InventorySessionViewSet(viewsets.ModelViewSet):
-    queryset = InventorySession.objects.select_related("legal_entity", "location", "started_by").all()
     serializer_class = InventorySessionSerializer
+
+    def get_queryset(self):
+        queryset = InventorySession.objects.select_related("legal_entity", "location", "started_by").all()
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return queryset
+        employee = get_employee_for_user(user)
+        if not employee:
+            return queryset.none()
+        return queryset.filter(legal_entity_id=employee.legal_entity_id)
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
-    queryset = InventoryItem.objects.select_related("session", "asset").all()
     serializer_class = InventoryItemSerializer
+
+    def get_queryset(self):
+        queryset = InventoryItem.objects.select_related("session", "asset").all()
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return queryset
+        employee = get_employee_for_user(user)
+        if not employee:
+            return queryset.none()
+        return queryset.filter(asset__legal_entity_id=employee.legal_entity_id)
 
 
 class TransferViewSet(viewsets.ModelViewSet):
@@ -186,6 +283,7 @@ class CurrentUserAPIView(APIView):
     )
     def get(self, request):
         user = request.user
+        employee = get_employee_for_user(user)
         return Response(
             {
                 "id": user.id,
@@ -194,37 +292,9 @@ class CurrentUserAPIView(APIView):
                 "is_staff": user.is_staff,
                 "is_superuser": user.is_superuser,
                 "is_admin": bool(user.is_staff or user.is_superuser),
+                "employee_id": employee.id if employee else None,
+                "employee_name": employee.full_name if employee else "",
+                "legal_entity_id": employee.legal_entity_id if employee else None,
+                "legal_entity_name": employee.legal_entity.name if employee else "",
             }
         )
-
-
-class BootstrapAdminRequestSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    password = serializers.CharField(min_length=8, write_only=True)
-    email = serializers.EmailField(required=False, allow_blank=True)
-
-
-class BootstrapAdminAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    @extend_schema(
-        summary="Создание первого администратора",
-        description="Создает суперпользователя, если в системе пока нет ни одного admin-пользователя.",
-        request=BootstrapAdminRequestSerializer,
-        responses={201: OpenApiResponse(description="Администратор создан"), 409: OpenApiResponse(description="Админ уже существует")},
-    )
-    def post(self, request):
-        User = get_user_model()
-        if User.objects.filter(is_superuser=True).exists():
-            return Response({"detail": "Администратор уже существует."}, status=status.HTTP_409_CONFLICT)
-
-        serializer = BootstrapAdminRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
-        user = User.objects.create_superuser(
-            username=data["username"],
-            password=data["password"],
-            email=data.get("email", ""),
-        )
-        return Response({"id": user.id, "username": user.username}, status=status.HTTP_201_CREATED)

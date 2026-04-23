@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib import admin, messages
+from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.urls import path
 from django.utils.html import format_html
@@ -16,7 +17,7 @@ from .models import (
     Transfer,
     WriteOffAct,
 )
-from .services import import_from_1c_xml
+from .services import export_to_1c_xml, import_from_1c_xml
 
 
 class XMLImportForm(forms.Form):
@@ -51,8 +52,9 @@ class AssetCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ("full_name", "position", "legal_entity", "external_1c_id")
-    search_fields = ("full_name", "position", "external_1c_id")
+    list_display = ("full_name", "position", "legal_entity", "user", "external_1c_id")
+    search_fields = ("full_name", "position", "external_1c_id", "user__username", "user__email")
+    autocomplete_fields = ("user",)
 
 
 @admin.register(Asset)
@@ -100,11 +102,19 @@ class OneCExchangeLogAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.import_xml_view),
                 name="inventory_onecexchangelog_import_xml",
             ),
+            path(
+                "export-xml/",
+                self.admin_site.admin_view(self.export_xml_view),
+                name="inventory_onecexchangelog_export_xml",
+            ),
         ]
         return custom_urls + urls
 
     def xml_import_link(self, obj):
-        return format_html('<a class="button" href="import-xml/">Импорт XML</a>')
+        return format_html(
+            '<a class="button" href="import-xml/">Импорт XML</a>&nbsp;'
+            '<a class="button" href="export-xml/">Экспорт XML</a>'
+        )
 
     xml_import_link.short_description = "Импорт XML"
 
@@ -130,3 +140,10 @@ class OneCExchangeLogAdmin(admin.ModelAdmin):
             return TemplateResponse(request, "admin/inventory/xml_import.html", context)
 
         return TemplateResponse(request, "admin/inventory/xml_import.html", context)
+
+    def export_xml_view(self, request):
+        xml_payload = export_to_1c_xml()
+        response = HttpResponse(xml_payload, content_type="application/xml; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="smartinv_export.xml"'
+        messages.success(request, "XML экспорт успешно сформирован.")
+        return response

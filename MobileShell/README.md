@@ -1,79 +1,79 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+Это новый проект на [**React Native**](https://reactnative.dev), созданный с помощью [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
-# Getting Started
+# Начало работы
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+>**Примечание**: Перед продолжением убедитесь, что вы выполнили инструкцию [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) до шага "Creating a new application".
 
-## Step 1: Start the Metro Server
+## Шаг 1: Запустите сервер Metro
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+Сначала нужно запустить **Metro** — JavaScript _бандлер_, который поставляется _вместе с_ React Native.
 
-To start Metro, run the following command from the _root_ of your React Native project:
+Чтобы запустить Metro, выполните следующую команду из _корня_ проекта React Native:
 
 ```bash
-# using npm
+# через npm
 npm start
 
-# OR using Yarn
+# ИЛИ через Yarn
 yarn start
 ```
 
-## Step 2: Start your Application
+## Шаг 2: Запустите приложение
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
+Оставьте Metro Bundler работать в _отдельном_ терминале. Затем откройте _новый_ терминал из _корня_ вашего React Native проекта. Выполните следующую команду, чтобы запустить приложение для _Android_ или _iOS_:
 
-### For Android
+### Для Android
 
 ```bash
-# using npm
+# через npm
 npm run android
 
-# OR using Yarn
+# ИЛИ через Yarn
 yarn android
 ```
 
-### For iOS
+### Для iOS
 
 ```bash
-# using npm
+# через npm
 npm run ios
 
-# OR using Yarn
+# ИЛИ через Yarn
 yarn ios
 ```
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
+Если все настроено _правильно_, через некоторое время вы увидите запущенное приложение в _Android Emulator_ или _iOS Simulator_ (при условии, что эмулятор/симулятор тоже настроен корректно).
 
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
+Это один из способов запуска приложения — также можно запускать его напрямую из Android Studio и Xcode соответственно.
 
-## Step 3: Modifying your App
+## Шаг 3: Изменение приложения
 
-Now that you have successfully run the app, let's modify it.
+Теперь, когда приложение успешно запущено, давайте внесем изменения.
 
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
+1. Откройте `App.tsx` в любом удобном текстовом редакторе и измените несколько строк.
+2. Для **Android**: дважды нажмите клавишу <kbd>R</kbd> или выберите **"Reload"** в **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (в Windows и Linux) или <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (в macOS)), чтобы увидеть изменения.
 
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
+   Для **iOS**: нажмите <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> в iOS Simulator, чтобы перезагрузить приложение и увидеть изменения.
 
-## Congratulations! :tada:
+## Поздравляем! :tada:
 
-You've successfully run and modified your React Native App. :partying_face:
+Вы успешно запустили и изменили свое React Native приложение. :partying_face:
 
-### Now what?
+### Что дальше?
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
+- Если вы хотите добавить этот новый React Native код в существующее приложение, посмотрите [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
+- Если хотите узнать о React Native больше, посмотрите [Introduction to React Native](https://reactnative.dev/docs/getting-started).
 
-# Troubleshooting
+# Устранение неполадок
 
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+Если что-то не работает, откройте страницу [Troubleshooting](https://reactnative.dev/docs/troubleshooting).
 
-# Learn More
+# Узнать больше
 
-To learn more about React Native, take a look at the following resources:
+Чтобы глубже изучить React Native, посмотрите следующие ресурсы:
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- [React Native Website](https://reactnative.dev) - подробнее о React Native.
+- [Getting Started](https://reactnative.dev/docs/environment-setup) - **обзор** React Native и того, как настроить окружение.
+- [Learn the Basics](https://reactnative.dev/docs/getting-started) - **пошаговое введение** в **основы** React Native.
+- [Blog](https://reactnative.dev/blog) - последние официальные публикации в **блоге** React Native.
+- [`@facebook/react-native`](https://github.com/facebook/react-native) - Open Source **репозиторий** React Native на GitHub.

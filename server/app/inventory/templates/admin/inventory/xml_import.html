@@ -3,6 +3,10 @@
 {% block content %}
 <h1>Импорт XML из 1С</h1>
 <p>Загрузите XML-файл или вставьте XML-пакет в поле ниже.</p>
+<p>
+  Для выгрузки текущих данных используйте
+  <a href="../export-xml/">экспорт XML</a>.
+</p>
 
 <form method="post" enctype="multipart/form-data">
   {% csrf_token %}
