@@ -90,4 +90,4 @@ class OneCExchangeLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = OneCExchangeLog
         fields = "__all__"
-        read_only_fields = "__all__"
+        read_only_fields = ("id", "direction", "status", "payload", "response", "error_message", "created_at", "updated_at")

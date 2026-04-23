@@ -164,7 +164,6 @@ SmartInv - mobile-first система учета и инвентаризаци�
 
 - OpenAPI schema: `/api/schema/`
 - Swagger UI: `/api/swagger/`
-- ReDoc: `/api/redoc/`
 
 ## Быстрый запуск через Docker
 
@@ -186,12 +185,25 @@ docker compose up --build
 - Backend API: `http://localhost:8000/api/v1/`
 - Swagger: `http://localhost:8000/api/swagger/`
 - Django admin: `http://localhost:8000/admin/`
+- pgAdmin: `http://localhost:5050/`
 
 ### 3. Создать администратора (один раз)
 
 ```bash
 docker compose exec backend python manage.py createsuperuser
 ```
+
+### 4. Вход в pgAdmin и подключение к БД
+
+- Логин/пароль pgAdmin берутся из `.env`:
+  - `PGADMIN_DEFAULT_EMAIL`
+  - `PGADMIN_DEFAULT_PASSWORD`
+- При добавлении сервера в pgAdmin используйте:
+  - Host: `db`
+  - Port: `5432`
+  - Database: `${POSTGRES_DB}`
+  - Username: `${POSTGRES_USER}`
+  - Password: `${POSTGRES_PASSWORD}`
 
 ## Локальный запуск backend (без Docker)
 

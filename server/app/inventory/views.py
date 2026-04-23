@@ -3,6 +3,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import serializers
 
 from .models import (
     Asset,
@@ -148,11 +149,20 @@ class OneCExportAPIView(APIView):
         return Response({"xml": xml_payload}, status=status.HTTP_200_OK)
 
 
+class InventoryAIAnalyzeResponseSerializer(serializers.Serializer):
+    inventory_item_id = serializers.IntegerField()
+    ai_provider = serializers.CharField()
+    ai_condition = serializers.CharField()
+    ai_confidence = serializers.FloatField()
+    ai_comment = serializers.CharField()
+
+
 class InventoryAIAnalyzeAPIView(APIView):
     @extend_schema(
         summary="ИИ-оценка состояния актива по результату сканирования",
         description="Обновляет ai_condition/ai_confidence для записи инвентаризации на основе OCR и комментария.",
-        responses={200: OpenApiResponse(description="Оценка выполнена")},
+        request=None,
+        responses={200: InventoryAIAnalyzeResponseSerializer},
     )
     def post(self, request, item_id: int):
         try:

@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Q
 
 
 class TimeStampedModel(models.Model):
@@ -88,14 +87,6 @@ class Asset(TimeStampedModel):
     purchase_date = models.DateField(null=True, blank=True)
     last_inventory_at = models.DateTimeField(null=True, blank=True)
     external_1c_id = models.CharField(max_length=128, blank=True, db_index=True)
-
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                check=Q(responsible_employee__isnull=False) | Q(location__isnull=False),
-                name="asset_must_have_employee_or_location",
-            )
-        ]
 
     def clean(self):
         if not self.responsible_employee and not self.location:
