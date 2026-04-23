@@ -193,7 +193,19 @@ docker compose up --build
 docker compose exec backend python manage.py createsuperuser
 ```
 
-### 4. Вход в pgAdmin и подключение к БД
+### 4. Сгенерировать тестовые данные для API
+
+```bash
+docker compose exec backend python manage.py seed_demo_data
+```
+
+Если нужно пересоздать демо-набор с очисткой текущих данных:
+
+```bash
+docker compose exec backend python manage.py seed_demo_data --clear
+```
+
+### 5. Вход в pgAdmin и подключение к БД
 
 - Логин/пароль pgAdmin берутся из `.env`:
   - `PGADMIN_DEFAULT_EMAIL`
