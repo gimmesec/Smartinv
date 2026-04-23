@@ -1,33 +1,48 @@
-version: '3.8'
-
 services:
   db:
-    image: mysql:8.0
-    container_name: bttrack_db
+    image: postgres:16-alpine
+    container_name: smartinv-db
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${DB_NAME:-bttrack}
-      MYSQL_USER: ${DB_USER:-bttrack_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-bttrack_password}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      POSTGRES_DB: ${POSTGRES_DB:-smartinv}
+      POSTGRES_USER: ${POSTGRES_USER:-smartinv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartinv}
     ports:
-      - "${DB_PORT:-3306}:3306"
+      - "5432:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./docker/mysql/init:/docker-entrypoint-initdb.d
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    networks:
-      - bttrack_network
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-root_password}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartinv} -d ${POSTGRES_DB:-smartinv}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartinv-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-smartinv-dev-secret-key}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      DB_ENGINE: django.db.backends.postgresql
+      POSTGRES_DB: ${POSTGRES_DB:-smartinv}
+      POSTGRES_USER: ${POSTGRES_USER:-smartinv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartinv}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./app:/app
+    ports:
+      - "8000:8000"
 
 volumes:
-  mysql_data:
-    driver: local
-
-networks:
-  bttrack_network:
-    driver: bridge
+  postgres_data:
