@@ -89,11 +89,8 @@ export function AssetsScreen() {
   }, [locations, rootLocations, selectedEntityId, selectedLocationId]);
 
   const currentAssets = useMemo(() => {
-    if (!selectedEntityId) {
+    if (!selectedEntityId || !selectedLocationId) {
       return [];
-    }
-    if (!selectedLocationId) {
-      return items.filter((asset) => asset.legal_entity === selectedEntityId);
     }
     const queue = [selectedLocationId];
     const subtree = new Set<number>();
@@ -111,6 +108,8 @@ export function AssetsScreen() {
     }
     return items.filter((asset) => asset.legal_entity === selectedEntityId && asset.location !== null && subtree.has(asset.location));
   }, [items, locations, selectedEntityId, selectedLocationId]);
+
+  const showAssetsAtCurrentLevel = selectedLocationId !== null && currentChildren.length === 0;
 
   if (selectedAsset) {
     const photoUrl = toMediaUrl(selectedAsset.photo);
@@ -173,7 +172,10 @@ export function AssetsScreen() {
             ) : null}
           </View>
           <FlatList
-            data={[...currentChildren.map((loc) => ({ type: "loc" as const, loc })), ...currentAssets.map((asset) => ({ type: "asset" as const, asset }))]}
+            data={[
+              ...currentChildren.map((loc) => ({ type: "loc" as const, loc })),
+              ...(showAssetsAtCurrentLevel ? currentAssets.map((asset) => ({ type: "asset" as const, asset })) : []),
+            ]}
             keyExtractor={(item) => (item.type === "loc" ? `loc-${item.loc.id}` : `asset-${item.asset.id}`)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
             renderItem={({ item }) => {

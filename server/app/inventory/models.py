@@ -118,6 +118,7 @@ class InventorySession(TimeStampedModel):
     legal_entity = models.ForeignKey(LegalEntity, on_delete=models.PROTECT, related_name="inventory_sessions")
     location = models.ForeignKey(Location, null=True, blank=True, on_delete=models.SET_NULL)
     started_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    conducted_by_employees = models.ManyToManyField("Employee", blank=True, related_name="inventory_sessions")
     status = models.CharField(max_length=20, choices=SessionStatus.choices, default=SessionStatus.DRAFT)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)

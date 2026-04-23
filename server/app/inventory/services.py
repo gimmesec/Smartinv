@@ -5,7 +5,7 @@ from uuid import uuid4
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Asset, Employee, LegalEntity, Location, OneCExchangeLog, WriteOffAct
+from .models import Asset, Employee, InventorySession, LegalEntity, Location, OneCExchangeLog, WriteOffAct
 
 
 def _safe_attr(node: ET.Element, key: str) -> str:
@@ -151,6 +151,7 @@ def export_to_1c_xml() -> str:
     locations_root = ET.SubElement(root, "locations")
     employees_root = ET.SubElement(root, "employees")
     assets_root = ET.SubElement(root, "assets")
+    inventory_sessions_root = ET.SubElement(root, "inventory_sessions")
     write_off_root = ET.SubElement(root, "write_off_acts")
 
     for entity in LegalEntity.objects.all():
@@ -208,6 +209,30 @@ def export_to_1c_xml() -> str:
                     else ""
                 ),
                 "location_id": asset.location.external_1c_id or str(asset.location.id) if asset.location else "",
+            },
+        )
+
+    for session in InventorySession.objects.select_related("legal_entity", "location", "started_by").prefetch_related(
+        "conducted_by_employees"
+    ):
+        ET.SubElement(
+            inventory_sessions_root,
+            "inventory_session",
+            {
+                "id": str(session.id),
+                "status": session.status,
+                "legal_entity_id": session.legal_entity.external_1c_id or str(session.legal_entity.id),
+                "location_id": (
+                    session.location.external_1c_id or str(session.location.id)
+                    if session.location
+                    else ""
+                ),
+                "started_by_user_id": str(session.started_by_id or ""),
+                "conducted_by_employee_ids": ",".join(
+                    str(employee.external_1c_id or employee.id) for employee in session.conducted_by_employees.all()
+                ),
+                "started_at": session.started_at.isoformat() if session.started_at else "",
+                "finished_at": session.finished_at.isoformat() if session.finished_at else "",
             },
         )
 

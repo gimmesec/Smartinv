@@ -8,18 +8,25 @@ import { MyResponsibleAssetsScreen } from "../features/assets/MyResponsibleAsset
 import { useAuth } from "../features/auth/AuthContext";
 import { LoginScreen } from "../features/auth/LoginScreen";
 import { InventoryScanScreen } from "../features/inventory/InventoryScanScreen";
+import { InventorySessionDetailScreen } from "../features/inventory/InventorySessionDetailScreen";
 import { InventorySessionScreen } from "../features/inventory/InventorySessionScreen";
 import { colors } from "../shared/theme";
+import { InventorySession } from "../shared/types";
 
 const AuthStack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 
 function InventoryEntryScreen() {
-  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
-  if (selectedSessionId) {
-    return <InventoryScanScreen sessionId={selectedSessionId} />;
+  const [selectedSession, setSelectedSession] = useState<InventorySession | null>(null);
+  const [startedSessionId, setStartedSessionId] = useState<number | null>(null);
+
+  if (startedSessionId) {
+    return <InventoryScanScreen sessionId={startedSessionId} />;
   }
-  return <InventorySessionScreen onSelectSession={setSelectedSessionId} />;
+  if (selectedSession) {
+    return <InventorySessionDetailScreen session={selectedSession} onBack={() => setSelectedSession(null)} />;
+  }
+  return <InventorySessionScreen onOpenSession={setSelectedSession} onStartSession={setStartedSessionId} />;
 }
 
 function MainTabs() {

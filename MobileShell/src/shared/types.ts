@@ -34,6 +34,7 @@ export type Employee = {
   id: number;
   full_name: string;
   legal_entity: number;
+  user?: number | null;
 };
 
 export type Asset = {
@@ -55,12 +56,21 @@ export type InventorySession = {
   status: string;
   legal_entity: number;
   location: number | null;
+  started_by?: number | null;
+  conducted_by_employees?: number[];
+  started_at?: string;
+  finished_at?: string | null;
 };
 
 export type InventoryItemResponse = {
   id: number;
   session: number;
   asset: number;
+  detected: boolean;
+  detected_inventory_number: string;
+  ocr_text: string;
   condition: string;
   comment: string;
+  photo?: string | null;
+  scanned_at?: string;
 };

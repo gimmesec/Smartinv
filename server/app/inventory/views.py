@@ -178,12 +178,72 @@ class InventorySessionViewSet(viewsets.ModelViewSet):
             return queryset.none()
         return queryset.filter(legal_entity_id=employee.legal_entity_id)
 
+    @action(detail=True, methods=["post"], url_path="conduct")
+    def conduct(self, request, pk=None):
+        session = self.get_object()
+        legal_entity_id = request.data.get("legal_entity_id")
+        if not legal_entity_id:
+            return Response({"detail": "legal_entity_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            legal_entity_id_int = int(legal_entity_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "legal_entity_id должен быть числом."}, status=status.HTTP_400_BAD_REQUEST)
+        if legal_entity_id_int != session.legal_entity_id:
+            return Response({"detail": "legal_entity_id должен совпадать с юрлицом выбранной сессии."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_admin = bool(request.user and (request.user.is_staff or request.user.is_superuser))
+        employee_ids = request.data.get("employee_ids") or []
+        if isinstance(employee_ids, int):
+            employee_ids = [employee_ids]
+        if not isinstance(employee_ids, list):
+            return Response({"detail": "employee_ids должен быть списком id сотрудников."}, status=status.HTTP_400_BAD_REQUEST)
+
+        selected_employees = []
+        if is_admin:
+            if employee_ids:
+                selected_employees = list(
+                    Employee.objects.select_related("user")
+                    .filter(id__in=employee_ids, legal_entity_id=session.legal_entity_id)
+                    .distinct()
+                )
+                if len(selected_employees) != len(set(employee_ids)):
+                    return Response(
+                        {"detail": "Все выбранные сотрудники должны существовать и принадлежать юрлицу сессии."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        else:
+            employee = get_employee_for_user(request.user)
+            if not employee:
+                return Response({"detail": "Сотрудник для текущего пользователя не найден."}, status=status.HTTP_400_BAD_REQUEST)
+            if employee.legal_entity_id != session.legal_entity_id:
+                return Response({"detail": "Сотрудник не относится к юрлицу сессии."}, status=status.HTTP_403_FORBIDDEN)
+            selected_employees = [employee]
+
+        started_by = request.user
+        first_with_user = next((emp for emp in selected_employees if emp.user_id), None)
+        if first_with_user:
+            started_by = first_with_user.user
+
+        session.legal_entity_id = legal_entity_id_int
+        session.started_by = started_by
+        if session.status == InventorySession.SessionStatus.DRAFT:
+            session.status = InventorySession.SessionStatus.IN_PROGRESS
+        session.save(update_fields=["legal_entity", "started_by", "status", "updated_at"])
+        if selected_employees:
+            session.conducted_by_employees.set(selected_employees)
+        else:
+            session.conducted_by_employees.clear()
+        return Response(self.get_serializer(session).data, status=status.HTTP_200_OK)
+
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     serializer_class = InventoryItemSerializer
 
     def get_queryset(self):
         queryset = InventoryItem.objects.select_related("session", "asset").all()
+        session_id = self.request.query_params.get("session")
+        if session_id:
+            queryset = queryset.filter(session_id=session_id)
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return queryset

@@ -235,6 +235,9 @@ class Command(BaseCommand):
                 status=InventorySession.SessionStatus.COMPLETED,
                 defaults={"finished_at": now - timedelta(days=1)},
             )
+            entity_employees = Employee.objects.filter(legal_entity=entity).order_by("id")[:2]
+            if entity_employees:
+                session.conducted_by_employees.set(entity_employees)
             for asset in [a for a in assets if a.legal_entity_id == entity.id]:
                 InventoryItem.objects.get_or_create(
                     session=session,

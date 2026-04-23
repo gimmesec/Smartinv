@@ -66,8 +66,14 @@ class AssetAdmin(admin.ModelAdmin):
 
 @admin.register(InventorySession)
 class InventorySessionAdmin(admin.ModelAdmin):
-    list_display = ("id", "status", "legal_entity", "started_at", "finished_at")
+    list_display = ("id", "status", "legal_entity", "started_at", "finished_at", "conductors")
     list_filter = ("status", "legal_entity")
+    filter_horizontal = ("conducted_by_employees",)
+
+    def conductors(self, obj):
+        return ", ".join(obj.conducted_by_employees.values_list("full_name", flat=True)) or "-"
+
+    conductors.short_description = "Проводили"
 
 
 @admin.register(InventoryItem)
