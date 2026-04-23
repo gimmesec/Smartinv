@@ -1,6 +1,8 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from django.contrib.auth import get_user_model
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import serializers
@@ -172,3 +174,57 @@ class InventoryAIAnalyzeAPIView(APIView):
 
         result = assess_inventory_item_with_ai(item)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class CurrentUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Текущий пользователь",
+        description="Возвращает профиль текущего пользователя и признаки admin-роли.",
+        responses={200: OpenApiResponse(description="Профиль пользователя")},
+    )
+    def get(self, request):
+        user = request.user
+        return Response(
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_staff": user.is_staff,
+                "is_superuser": user.is_superuser,
+                "is_admin": bool(user.is_staff or user.is_superuser),
+            }
+        )
+
+
+class BootstrapAdminRequestSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(min_length=8, write_only=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+
+class BootstrapAdminAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Создание первого администратора",
+        description="Создает суперпользователя, если в системе пока нет ни одного admin-пользователя.",
+        request=BootstrapAdminRequestSerializer,
+        responses={201: OpenApiResponse(description="Администратор создан"), 409: OpenApiResponse(description="Админ уже существует")},
+    )
+    def post(self, request):
+        User = get_user_model()
+        if User.objects.filter(is_superuser=True).exists():
+            return Response({"detail": "Администратор уже существует."}, status=status.HTTP_409_CONFLICT)
+
+        serializer = BootstrapAdminRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = User.objects.create_superuser(
+            username=data["username"],
+            password=data["password"],
+            email=data.get("email", ""),
+        )
+        return Response({"id": user.id, "username": user.username}, status=status.HTTP_201_CREATED)

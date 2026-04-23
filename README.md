@@ -250,6 +250,27 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+## Мобильное приложение (Android, React Native CLI)
+
+Реализован MVP-клиент в папке `mobile/`:
+
+- авторизация по JWT (`/api/v1/auth/token/`, `/api/v1/auth/token/refresh/`);
+- раздел активов;
+- раздел инвентаризации (выбор сессии, сканирование QR/штрихкода, отправка результата, AI-анализ);
+- role-based UI: вкладка `Админ` показывается только для `is_staff/is_superuser`.
+
+### Запуск mobile-клиента
+
+```bash
+cd mobile
+npm install
+npm run start
+npm run android
+```
+
+Для Android-эмулятора API backend берётся с `http://10.0.2.2:8000/api/v1`.
+Перед запуском убедитесь, что backend поднят через Docker (`server/docker-compose.yml`).
+
 ## Сценарий использования в дипломном проекте
 
 - Администратор создает юрлица, структуру помещений, сотрудников и активы.
@@ -264,7 +285,6 @@ python manage.py runserver
 
 Для полной production-готовности рекомендуется добавить:
 
-- JWT-аутентификацию для mobile-клиента;
 - асинхронные задачи (Celery/RQ) для обмена с 1С;
 - фоновые проверки целостности данных;
 - unit/integration тесты для XML-синхронизации.

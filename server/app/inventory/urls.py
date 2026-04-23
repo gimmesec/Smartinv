@@ -9,12 +9,14 @@ from .views import (
     InventorySessionViewSet,
     LegalEntityViewSet,
     LocationViewSet,
+    BootstrapAdminAPIView,
     OneCExchangeLogViewSet,
     InventoryAIAnalyzeAPIView,
     OneCExportAPIView,
     OneCImportAPIView,
     TransferViewSet,
     WriteOffActViewSet,
+    CurrentUserAPIView,
 )
 
 router = DefaultRouter()
@@ -34,4 +36,6 @@ urlpatterns = [
     path("integrations/1c/import/", OneCImportAPIView.as_view(), name="onec-import"),
     path("integrations/1c/export/", OneCExportAPIView.as_view(), name="onec-export"),
     path("inventory-items/<int:item_id>/ai-analyze/", InventoryAIAnalyzeAPIView.as_view(), name="inventory-ai-analyze"),
+    path("auth/me/", CurrentUserAPIView.as_view(), name="auth-me"),
+    path("auth/bootstrap-admin/", BootstrapAdminAPIView.as_view(), name="auth-bootstrap-admin"),
 ]
