@@ -164,6 +164,8 @@ class Command(BaseCommand):
                     "location": entity_locations["it"],
                     "employee": entity_employees[0],
                     "status": Asset.AssetStatus.ACTIVE,
+                    "quantity": "1.00",
+                    "unit_price": "85000.00",
                 },
                 {
                     "name": "Принтер HP LaserJet",
@@ -173,6 +175,8 @@ class Command(BaseCommand):
                     "location": entity_locations["acc"],
                     "employee": None,
                     "status": Asset.AssetStatus.ACTIVE,
+                    "quantity": "2.00",
+                    "unit_price": "21000.00",
                 },
                 {
                     "name": "Рабочий стол офисный",
@@ -182,6 +186,8 @@ class Command(BaseCommand):
                     "location": entity_locations["acc"],
                     "employee": entity_employees[1],
                     "status": Asset.AssetStatus.DAMAGED,
+                    "quantity": "4.00",
+                    "unit_price": "12000.00",
                 },
             ]
             for pos, sample in enumerate(samples, start=1):
@@ -195,6 +201,8 @@ class Command(BaseCommand):
                         "location": sample["location"],
                         "responsible_employee": sample["employee"],
                         "status": sample["status"],
+                        "quantity": sample["quantity"],
+                        "unit_price": sample["unit_price"],
                         "qr_code": f"QR-{sample['inventory_number']}",
                         "barcode": f"BC-{sample['inventory_number']}",
                         "description": "Тестовый актив для проверки API",
@@ -229,18 +237,37 @@ class Command(BaseCommand):
 
     def _seed_inventory(self, entities, locations_map, assets, now):
         for entity in entities:
-            session, _ = InventorySession.objects.get_or_create(
-                legal_entity=entity,
-                location=locations_map[entity.id]["office"],
-                status=InventorySession.SessionStatus.COMPLETED,
-                defaults={"finished_at": now - timedelta(days=1)},
+            entity_assets = [a for a in assets if a.legal_entity_id == entity.id]
+            entity_employees = list(Employee.objects.filter(legal_entity=entity).order_by("id")[:2])
+            started_by_user = entity_employees[0].user if entity_employees and entity_employees[0].user_id else None
+
+            completed_session = (
+                InventorySession.objects.filter(
+                    legal_entity=entity,
+                    location=locations_map[entity.id]["office"],
+                    status=InventorySession.SessionStatus.COMPLETED,
+                )
+                .order_by("id")
+                .first()
             )
-            entity_employees = Employee.objects.filter(legal_entity=entity).order_by("id")[:2]
+            if not completed_session:
+                completed_session = InventorySession.objects.create(
+                    legal_entity=entity,
+                    location=locations_map[entity.id]["office"],
+                    status=InventorySession.SessionStatus.COMPLETED,
+                    started_by=started_by_user,
+                    finished_at=now - timedelta(days=1),
+                )
+            else:
+                completed_session.started_by = started_by_user
+                completed_session.finished_at = now - timedelta(days=1)
+                completed_session.save(update_fields=["started_by", "finished_at", "updated_at"])
             if entity_employees:
-                session.conducted_by_employees.set(entity_employees)
-            for asset in [a for a in assets if a.legal_entity_id == entity.id]:
+                completed_session.conducted_by_employees.set(entity_employees)
+
+            for asset in entity_assets:
                 InventoryItem.objects.get_or_create(
-                    session=session,
+                    session=completed_session,
                     asset=asset,
                     defaults={
                         "detected": True,
@@ -260,6 +287,46 @@ class Command(BaseCommand):
                         "ai_provider": "free-heuristic-v1",
                         "ai_comment": "Тестовая ИИ-оценка состояния актива",
                         "comment": "Проверено мобильным сканированием",
+                    },
+                )
+
+            in_progress_session = (
+                InventorySession.objects.filter(
+                    legal_entity=entity,
+                    location=locations_map[entity.id]["it"],
+                    status=InventorySession.SessionStatus.IN_PROGRESS,
+                )
+                .order_by("id")
+                .first()
+            )
+            if not in_progress_session:
+                in_progress_session = InventorySession.objects.create(
+                    legal_entity=entity,
+                    location=locations_map[entity.id]["it"],
+                    status=InventorySession.SessionStatus.IN_PROGRESS,
+                    started_by=started_by_user,
+                )
+            else:
+                in_progress_session.started_by = started_by_user
+                in_progress_session.finished_at = None
+                in_progress_session.save(update_fields=["started_by", "finished_at", "updated_at"])
+            if entity_employees:
+                in_progress_session.conducted_by_employees.set(entity_employees)
+
+            for asset in entity_assets[:2]:
+                InventoryItem.objects.get_or_create(
+                    session=in_progress_session,
+                    asset=asset,
+                    defaults={
+                        "detected": True,
+                        "detected_inventory_number": asset.inventory_number,
+                        "ocr_text": f"Asset {asset.inventory_number} recognized",
+                        "condition": InventoryItem.Condition.OK,
+                        "ai_condition": InventoryItem.Condition.OK,
+                        "ai_confidence": "0.79",
+                        "ai_provider": "free-heuristic-v1",
+                        "ai_comment": "Промежуточный результат инвентаризации",
+                        "comment": "Частично проверено в текущем процессе",
                     },
                 )
 

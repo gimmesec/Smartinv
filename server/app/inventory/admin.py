@@ -1,8 +1,10 @@
 from django import forms
 from django.contrib import admin, messages
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path
+from django.utils.html import format_html
 
 from .models import (
     Asset,
@@ -16,7 +18,7 @@ from .models import (
     Transfer,
     WriteOffAct,
 )
-from .services import export_to_1c_xml, import_from_1c_xml
+from .services import export_inventory_session_to_1c_xml, export_to_1c_xml, import_from_1c_xml
 
 
 class XMLImportForm(forms.Form):
@@ -65,14 +67,38 @@ class AssetAdmin(admin.ModelAdmin):
 
 @admin.register(InventorySession)
 class InventorySessionAdmin(admin.ModelAdmin):
-    list_display = ("id", "status", "legal_entity", "started_at", "finished_at", "conductors")
+    list_display = ("id", "status", "legal_entity", "started_at", "finished_at", "conductors", "export_xml_link")
     list_filter = ("status", "legal_entity")
     filter_horizontal = ("conducted_by_employees",)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<int:session_id>/export-xml/",
+                self.admin_site.admin_view(self.export_session_xml_view),
+                name="inventory_inventorysession_export_xml",
+            ),
+        ]
+        return custom_urls + urls
 
     def conductors(self, obj):
         return ", ".join(obj.conducted_by_employees.values_list("full_name", flat=True)) or "-"
 
     conductors.short_description = "Проводили"
+
+    def export_xml_link(self, obj):
+        return format_html('<a class="button" href="{}/export-xml/">Экспорт сессии XML</a>', obj.id)
+
+    export_xml_link.short_description = "Экспорт"
+
+    def export_session_xml_view(self, request, session_id: int):
+        session = get_object_or_404(InventorySession, id=session_id)
+        xml_payload = export_inventory_session_to_1c_xml(session)
+        response = HttpResponse(xml_payload, content_type="application/xml; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="smartinv_inventory_session_{session.id}.xml"'
+        messages.success(request, f"XML сессии #{session.id} успешно сформирован.")
+        return response
 
 
 @admin.register(InventoryItem)

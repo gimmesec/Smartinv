@@ -1,4 +1,5 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission, IsAuthenticated
@@ -170,6 +171,12 @@ class InventorySessionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = InventorySession.objects.select_related("legal_entity", "location", "started_by").all()
+        legal_entity_id = self.request.query_params.get("legal_entity")
+        status_value = self.request.query_params.get("status")
+        if legal_entity_id:
+            queryset = queryset.filter(legal_entity_id=legal_entity_id)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return queryset
@@ -233,6 +240,16 @@ class InventorySessionViewSet(viewsets.ModelViewSet):
             session.conducted_by_employees.set(selected_employees)
         else:
             session.conducted_by_employees.clear()
+        return Response(self.get_serializer(session).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="complete")
+    def complete(self, request, pk=None):
+        session = self.get_object()
+        if session.status == InventorySession.SessionStatus.COMPLETED:
+            return Response(self.get_serializer(session).data, status=status.HTTP_200_OK)
+        session.status = InventorySession.SessionStatus.COMPLETED
+        session.finished_at = timezone.now()
+        session.save(update_fields=["status", "finished_at", "updated_at"])
         return Response(self.get_serializer(session).data, status=status.HTTP_200_OK)
 
 

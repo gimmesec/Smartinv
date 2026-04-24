@@ -21,7 +21,7 @@ function InventoryEntryScreen() {
   const [startedSessionId, setStartedSessionId] = useState<number | null>(null);
 
   if (startedSessionId) {
-    return <InventoryScanScreen sessionId={startedSessionId} />;
+    return <InventoryScanScreen sessionId={startedSessionId} onFinish={() => setStartedSessionId(null)} />;
   }
   if (selectedSession) {
     return <InventorySessionDetailScreen session={selectedSession} onBack={() => setSelectedSession(null)} />;

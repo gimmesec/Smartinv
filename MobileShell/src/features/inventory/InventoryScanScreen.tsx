@@ -8,6 +8,7 @@ import { Asset, InventoryItemResponse, InventorySession } from "../../shared/typ
 
 type Props = {
   sessionId: number;
+  onFinish: () => void;
 };
 
 const CONDITION_OPTIONS = [
@@ -16,7 +17,7 @@ const CONDITION_OPTIONS = [
   { value: "absent", label: "Отсутствует" },
 ];
 
-export function InventoryScanScreen({ sessionId }: Props) {
+export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [session, setSession] = useState<InventorySession | null>(null);
   const [items, setItems] = useState<InventoryItemResponse[]>([]);
@@ -154,6 +155,16 @@ export function InventoryScanScreen({ sessionId }: Props) {
     }
   };
 
+  const finishSession = async () => {
+    try {
+      await api.post(`/inventory-sessions/${sessionId}/complete/`);
+      Alert.alert("Готово", "Инвентаризация завершена.");
+      onFinish();
+    } catch {
+      Alert.alert("Ошибка", "Не удалось завершить инвентаризацию.");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Сессия #{sessionId}</Text>
@@ -221,6 +232,9 @@ export function InventoryScanScreen({ sessionId }: Props) {
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Итог по сессии</Text>
         <Text style={styles.meta}>Добавлено в инвентаризацию: {items.length}</Text>
+        <Pressable style={styles.finishButton} onPress={finishSession}>
+          <Text style={styles.finishButtonText}>Завершить инвентаризацию</Text>
+        </Pressable>
       </View>
 
       <View style={styles.bottomRow}>
@@ -285,6 +299,16 @@ const styles = StyleSheet.create({
   lookupText: { color: colors.textPrimary, fontWeight: "700" },
   summaryCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: colors.surface },
   summaryTitle: { color: colors.textPrimary, fontWeight: "700", marginBottom: 4 },
+  finishButton: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.success,
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+  },
+  finishButtonText: { color: colors.success, fontWeight: "700" },
   bottomRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionButton: { flex: 1, backgroundColor: colors.accent, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   actionText: { color: "#fff", fontWeight: "700" },

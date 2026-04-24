@@ -1,15 +1,27 @@
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Asset, Employee, InventorySession, LegalEntity, Location, OneCExchangeLog, WriteOffAct
+from .models import Asset, Employee, InventoryItem, InventorySession, LegalEntity, Location, OneCExchangeLog, WriteOffAct
 
 
 def _safe_attr(node: ET.Element, key: str) -> str:
     return (node.attrib.get(key) or "").strip()
+
+
+def _ensure_legal_entity(external_id: str, name: str = "", tax_id: str = "") -> LegalEntity:
+    external_id = (external_id or "").strip()
+    name = (name or "").strip() or f"Юрлицо {external_id or 'unknown'}"
+    tax_id = (tax_id or "").strip() or (external_id or f"tmp-{uuid4().hex[:10]}")
+    legal_entity, _ = LegalEntity.objects.get_or_create(
+        external_1c_id=external_id,
+        defaults={"name": name, "tax_id": tax_id},
+    )
+    return legal_entity
 
 
 @transaction.atomic
@@ -52,9 +64,9 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         if locations_root is not None:
             for node in locations_root.findall("location"):
                 entity_external_id = _safe_attr(node, "legal_entity_id")
-                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first()
-                if not legal_entity:
-                    continue
+                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first() or _ensure_legal_entity(
+                    entity_external_id
+                )
                 Location.objects.update_or_create(
                     external_1c_id=_safe_attr(node, "id"),
                     defaults={
@@ -70,9 +82,9 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         if employees_root is not None:
             for node in employees_root.findall("employee"):
                 entity_external_id = _safe_attr(node, "legal_entity_id")
-                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first()
-                if not legal_entity:
-                    continue
+                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first() or _ensure_legal_entity(
+                    entity_external_id
+                )
                 Employee.objects.update_or_create(
                     external_1c_id=_safe_attr(node, "id"),
                     defaults={
@@ -88,11 +100,30 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         if assets_root is not None:
             for node in assets_root.findall("asset"):
                 entity_external_id = _safe_attr(node, "legal_entity_id")
-                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first()
-                if not legal_entity:
-                    continue
-                responsible_employee = Employee.objects.filter(external_1c_id=_safe_attr(node, "employee_id")).first()
-                location = Location.objects.filter(external_1c_id=_safe_attr(node, "location_id")).first()
+                legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first() or _ensure_legal_entity(
+                    entity_external_id
+                )
+                employee_external_id = _safe_attr(node, "employee_id")
+                location_external_id = _safe_attr(node, "location_id")
+                responsible_employee = None
+                location = None
+                if employee_external_id:
+                    responsible_employee, _ = Employee.objects.get_or_create(
+                        external_1c_id=employee_external_id,
+                        defaults={
+                            "legal_entity": legal_entity,
+                            "full_name": f"Сотрудник {employee_external_id}",
+                        },
+                    )
+                if location_external_id:
+                    location, _ = Location.objects.get_or_create(
+                        external_1c_id=location_external_id,
+                        defaults={
+                            "legal_entity": legal_entity,
+                            "name": f"Локация {location_external_id}",
+                            "type": Location.LocationType.ROOM,
+                        },
+                    )
                 Asset.objects.update_or_create(
                     external_1c_id=_safe_attr(node, "id"),
                     defaults={
@@ -102,6 +133,8 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                         "serial_number": _safe_attr(node, "serial_number"),
                         "legal_entity": legal_entity,
                         "status": _safe_attr(node, "status") or Asset.AssetStatus.ACTIVE,
+                        "quantity": _safe_attr(node, "quantity") or "1.00",
+                        "unit_price": _safe_attr(node, "price") or "0.00",
                         "responsible_employee": responsible_employee,
                         "location": location,
                     },
@@ -113,7 +146,14 @@ def import_from_1c_xml(xml_payload: str) -> dict:
             for node in write_off_root.findall("write_off_act"):
                 asset = Asset.objects.filter(external_1c_id=_safe_attr(node, "asset_id")).first()
                 if not asset:
-                    continue
+                    legal_entity = LegalEntity.objects.order_by("id").first() or _ensure_legal_entity("auto-generated")
+                    asset = Asset.objects.create(
+                        external_1c_id=_safe_attr(node, "asset_id"),
+                        legal_entity=legal_entity,
+                        name=f"Актив {_safe_attr(node, 'asset_id')}",
+                        inventory_number=f"AUTO-{uuid4().hex[:8]}",
+                        status=Asset.AssetStatus.WRITTEN_OFF,
+                    )
                 WriteOffAct.objects.update_or_create(
                     external_1c_id=_safe_attr(node, "id"),
                     defaults={
@@ -145,8 +185,14 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         raise
 
 
-def export_to_1c_xml() -> str:
-    root = ET.Element("exchange")
+def _build_exchange_xml(session: InventorySession | None = None) -> str:
+    root = ET.Element(
+        "exchange",
+        {
+            "format_version": "2.0",
+            "generated_at": timezone.now().isoformat(),
+        },
+    )
     entities_root = ET.SubElement(root, "legal_entities")
     locations_root = ET.SubElement(root, "locations")
     employees_root = ET.SubElement(root, "employees")
@@ -154,7 +200,32 @@ def export_to_1c_xml() -> str:
     inventory_sessions_root = ET.SubElement(root, "inventory_sessions")
     write_off_root = ET.SubElement(root, "write_off_acts")
 
-    for entity in LegalEntity.objects.all():
+    if session:
+        entities_queryset = LegalEntity.objects.filter(id=session.legal_entity_id)
+        locations_queryset = Location.objects.select_related("legal_entity").filter(legal_entity_id=session.legal_entity_id)
+        employees_queryset = Employee.objects.select_related("legal_entity").filter(legal_entity_id=session.legal_entity_id)
+        assets_queryset = Asset.objects.select_related("legal_entity", "location", "responsible_employee").filter(
+            legal_entity_id=session.legal_entity_id
+        )
+        sessions_queryset = (
+            InventorySession.objects.select_related("legal_entity", "location", "started_by")
+            .prefetch_related("conducted_by_employees")
+            .filter(id=session.id)
+        )
+        items_queryset = InventoryItem.objects.select_related("session", "asset").filter(session_id=session.id)
+        write_off_queryset = WriteOffAct.objects.select_related("asset").filter(asset__legal_entity_id=session.legal_entity_id)
+    else:
+        entities_queryset = LegalEntity.objects.all()
+        locations_queryset = Location.objects.select_related("legal_entity").all()
+        employees_queryset = Employee.objects.select_related("legal_entity").all()
+        assets_queryset = Asset.objects.select_related("legal_entity", "location", "responsible_employee").all()
+        sessions_queryset = InventorySession.objects.select_related("legal_entity", "location", "started_by").prefetch_related(
+            "conducted_by_employees"
+        )
+        items_queryset = InventoryItem.objects.select_related("session", "asset").all()
+        write_off_queryset = WriteOffAct.objects.select_related("asset").all()
+
+    for entity in entities_queryset:
         ET.SubElement(
             entities_root,
             "legal_entity",
@@ -167,7 +238,7 @@ def export_to_1c_xml() -> str:
             },
         )
 
-    for location in Location.objects.select_related("legal_entity").all():
+    for location in locations_queryset:
         ET.SubElement(
             locations_root,
             "location",
@@ -179,7 +250,7 @@ def export_to_1c_xml() -> str:
             },
         )
 
-    for employee in Employee.objects.select_related("legal_entity").all():
+    for employee in employees_queryset:
         ET.SubElement(
             employees_root,
             "employee",
@@ -192,7 +263,7 @@ def export_to_1c_xml() -> str:
             },
         )
 
-    for asset in Asset.objects.select_related("legal_entity", "location", "responsible_employee").all():
+    for asset in assets_queryset:
         ET.SubElement(
             assets_root,
             "asset",
@@ -202,7 +273,11 @@ def export_to_1c_xml() -> str:
                 "inventory_number": asset.inventory_number,
                 "serial_number": asset.serial_number or "",
                 "status": asset.status,
+                "quantity": str(asset.quantity),
+                "price": str(asset.unit_price),
                 "legal_entity_id": asset.legal_entity.external_1c_id or str(asset.legal_entity.id),
+                "legal_entity_name": asset.legal_entity.name,
+                "legal_entity_tax_id": asset.legal_entity.tax_id,
                 "employee_id": (
                     asset.responsible_employee.external_1c_id or str(asset.responsible_employee.id)
                     if asset.responsible_employee
@@ -212,31 +287,53 @@ def export_to_1c_xml() -> str:
             },
         )
 
-    for session in InventorySession.objects.select_related("legal_entity", "location", "started_by").prefetch_related(
-        "conducted_by_employees"
-    ):
-        ET.SubElement(
+    items_by_session_id: dict[int, list[InventoryItem]] = {}
+    for item in items_queryset:
+        items_by_session_id.setdefault(item.session_id, []).append(item)
+
+    for inventory_session in sessions_queryset:
+        session_node = ET.SubElement(
             inventory_sessions_root,
             "inventory_session",
             {
-                "id": str(session.id),
-                "status": session.status,
-                "legal_entity_id": session.legal_entity.external_1c_id or str(session.legal_entity.id),
+                "id": str(inventory_session.id),
+                "status": inventory_session.status,
+                "legal_entity_id": inventory_session.legal_entity.external_1c_id or str(inventory_session.legal_entity.id),
+                "legal_entity_name": inventory_session.legal_entity.name,
+                "legal_entity_tax_id": inventory_session.legal_entity.tax_id,
                 "location_id": (
-                    session.location.external_1c_id or str(session.location.id)
-                    if session.location
+                    inventory_session.location.external_1c_id or str(inventory_session.location.id)
+                    if inventory_session.location
                     else ""
                 ),
-                "started_by_user_id": str(session.started_by_id or ""),
+                "started_by_user_id": str(inventory_session.started_by_id or ""),
                 "conducted_by_employee_ids": ",".join(
-                    str(employee.external_1c_id or employee.id) for employee in session.conducted_by_employees.all()
+                    str(employee.external_1c_id or employee.id) for employee in inventory_session.conducted_by_employees.all()
                 ),
-                "started_at": session.started_at.isoformat() if session.started_at else "",
-                "finished_at": session.finished_at.isoformat() if session.finished_at else "",
+                "started_at": inventory_session.started_at.isoformat() if inventory_session.started_at else "",
+                "finished_at": inventory_session.finished_at.isoformat() if inventory_session.finished_at else "",
             },
         )
+        items_node = ET.SubElement(session_node, "items")
+        for item in items_by_session_id.get(inventory_session.id, []):
+            ET.SubElement(
+                items_node,
+                "item",
+                {
+                    "id": str(item.id),
+                    "asset_id": item.asset.external_1c_id or str(item.asset.id),
+                    "asset_name": item.asset.name,
+                    "inventory_number": item.asset.inventory_number,
+                    "quantity": str(item.asset.quantity),
+                    "price": str(item.asset.unit_price),
+                    "condition": item.condition,
+                    "comment": item.comment or "",
+                    "scanned_at": item.scanned_at.isoformat() if item.scanned_at else "",
+                    "detected": "true" if item.detected else "false",
+                },
+            )
 
-    for act in WriteOffAct.objects.select_related("asset").all():
+    for act in write_off_queryset:
         ET.SubElement(
             write_off_root,
             "write_off_act",
@@ -249,7 +346,22 @@ def export_to_1c_xml() -> str:
             },
         )
 
-    xml_string = ET.tostring(root, encoding="unicode")
+    ET.indent(root, space="  ")
+    return ET.tostring(root, encoding="unicode")
+
+
+def export_to_1c_xml() -> str:
+    xml_string = _build_exchange_xml()
+    OneCExchangeLog.objects.create(
+        direction=OneCExchangeLog.Direction.EXPORT,
+        status=OneCExchangeLog.Status.SUCCESS,
+        response=xml_string,
+    )
+    return xml_string
+
+
+def export_inventory_session_to_1c_xml(session: InventorySession) -> str:
+    xml_string = _build_exchange_xml(session=session)
     OneCExchangeLog.objects.create(
         direction=OneCExchangeLog.Direction.EXPORT,
         status=OneCExchangeLog.Status.SUCCESS,

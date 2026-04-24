@@ -89,6 +89,8 @@ class Asset(TimeStampedModel):
     status = models.CharField(max_length=20, choices=AssetStatus.choices, default=AssetStatus.ACTIVE)
     qr_code = models.CharField(max_length=128, blank=True, db_index=True)
     barcode = models.CharField(max_length=128, blank=True, db_index=True)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     photo = models.ImageField(upload_to="assets/photos/", blank=True, null=True)
     description = models.TextField(blank=True)
     purchase_date = models.DateField(null=True, blank=True)

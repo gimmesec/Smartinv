@@ -68,16 +68,24 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
     }
     setStarting(true);
     try {
-      const createSessionRes = await api.post<InventorySession>("/inventory-sessions/", {
-        legal_entity: selectedLegalEntityId,
-        status: "draft",
+      const activeSessionsRes = await api.get<InventorySession[]>("/inventory-sessions/", {
+        params: { legal_entity: selectedLegalEntityId, status: "in_progress" },
       });
+      const activeSession = activeSessionsRes.data[0];
+      const targetSession =
+        activeSession ||
+        (
+          await api.post<InventorySession>("/inventory-sessions/", {
+            legal_entity: selectedLegalEntityId,
+            status: "draft",
+          })
+        ).data;
       const payload = {
         legal_entity_id: selectedLegalEntityId,
         ...(isAdmin ? { employee_ids: selectedEmployeeIds } : {}),
       };
-      await api.post(`/inventory-sessions/${createSessionRes.data.id}/conduct/`, payload);
-      onStartSession(createSessionRes.data.id);
+      await api.post(`/inventory-sessions/${targetSession.id}/conduct/`, payload);
+      onStartSession(targetSession.id);
     } catch (error: any) {
       const detail = error?.response?.data?.detail;
       Alert.alert("Ошибка", detail || "Не удалось создать и запустить инвентаризацию.");
