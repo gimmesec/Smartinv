@@ -124,6 +124,14 @@ class InventorySession(TimeStampedModel):
     status = models.CharField(max_length=20, choices=SessionStatus.choices, default=SessionStatus.DRAFT)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    external_1c_id = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        unique=True,
+        db_index=True,
+        help_text="Идентификатор сессии в 1С (GUID/номер документа) для идемпотентного импорта.",
+    )
 
     def __str__(self) -> str:
         return f"Инвентаризация #{self.id}"

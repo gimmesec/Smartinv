@@ -3,14 +3,32 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
 from .models import Asset, Employee, InventoryItem, InventorySession, LegalEntity, Location, OneCExchangeLog, WriteOffAct
 
+User = get_user_model()
+
 
 def _safe_attr(node: ET.Element, key: str) -> str:
     return (node.attrib.get(key) or "").strip()
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt)
+    return dt
 
 
 def _ensure_legal_entity(external_id: str, name: str = "", tax_id: str = "") -> LegalEntity:
@@ -45,6 +63,8 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         locations_count = 0
         employees_count = 0
         assets_count = 0
+        sessions_count = 0
+        items_count = 0
         write_off_count = 0
 
         entities_root = root.find("legal_entities")
@@ -141,6 +161,87 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                 )
                 assets_count += 1
 
+        sessions_root = root.find("inventory_sessions")
+        if sessions_root is not None:
+            allowed_session_status = {c[0] for c in InventorySession.SessionStatus.choices}
+            allowed_item_condition = {c[0] for c in InventoryItem.Condition.choices}
+            for snode in sessions_root.findall("inventory_session"):
+                external_session_id = _safe_attr(snode, "id")
+                if not external_session_id:
+                    continue
+                le_ext = _safe_attr(snode, "legal_entity_id")
+                legal_entity = LegalEntity.objects.filter(external_1c_id=le_ext).first() or _ensure_legal_entity(
+                    le_ext,
+                    name=_safe_attr(snode, "legal_entity_name"),
+                    tax_id=_safe_attr(snode, "legal_entity_tax_id"),
+                )
+                location = None
+                loc_ext = _safe_attr(snode, "location_id")
+                if loc_ext:
+                    location = Location.objects.filter(external_1c_id=loc_ext).first()
+                status = _safe_attr(snode, "status") or InventorySession.SessionStatus.DRAFT
+                if status not in allowed_session_status:
+                    status = InventorySession.SessionStatus.IN_PROGRESS
+                started_by = None
+                uid = _safe_attr(snode, "started_by_user_id")
+                if uid.isdigit():
+                    started_by = User.objects.filter(pk=int(uid)).first()
+                started_at = _parse_iso_datetime(_safe_attr(snode, "started_at"))
+                finished_at = _parse_iso_datetime(_safe_attr(snode, "finished_at"))
+                session_defaults: dict = {
+                    "legal_entity": legal_entity,
+                    "location": location,
+                    "started_by": started_by,
+                    "status": status,
+                    "finished_at": finished_at,
+                }
+                if started_at:
+                    session_defaults["started_at"] = started_at
+                session_obj, _ = InventorySession.objects.update_or_create(
+                    external_1c_id=external_session_id,
+                    defaults=session_defaults,
+                )
+                conducted_raw = _safe_attr(snode, "conducted_by_employee_ids")
+                if conducted_raw:
+                    refs = [x.strip() for x in conducted_raw.split(",") if x.strip()]
+                    emps: list[Employee] = []
+                    for ref in refs:
+                        emp = Employee.objects.filter(external_1c_id=ref).first()
+                        if emp is None and ref.isdigit():
+                            emp = Employee.objects.filter(pk=int(ref)).first()
+                        if emp is not None:
+                            emps.append(emp)
+                    session_obj.conducted_by_employees.set(emps)
+                items_node = snode.find("items")
+                if items_node is not None:
+                    for inode in items_node.findall("item"):
+                        asset_ext = _safe_attr(inode, "asset_id")
+                        asset = Asset.objects.filter(external_1c_id=asset_ext).first()
+                        if asset is None and asset_ext.isdigit():
+                            asset = Asset.objects.filter(pk=int(asset_ext)).first()
+                        if asset is None:
+                            continue
+                        cond = _safe_attr(inode, "condition") or InventoryItem.Condition.OK
+                        if cond not in allowed_item_condition:
+                            cond = InventoryItem.Condition.OK
+                        det = _safe_attr(inode, "detected").lower()
+                        detected = det in ("true", "1", "yes")
+                        scanned_at = _parse_iso_datetime(_safe_attr(inode, "scanned_at"))
+                        item_defaults: dict = {
+                            "condition": cond,
+                            "comment": _safe_attr(inode, "comment"),
+                            "detected": detected,
+                        }
+                        if scanned_at:
+                            item_defaults["scanned_at"] = scanned_at
+                        InventoryItem.objects.update_or_create(
+                            session=session_obj,
+                            asset=asset,
+                            defaults=item_defaults,
+                        )
+                        items_count += 1
+                sessions_count += 1
+
         write_off_root = root.find("write_off_acts")
         if write_off_root is not None:
             for node in write_off_root.findall("write_off_act"):
@@ -171,6 +272,8 @@ def import_from_1c_xml(xml_payload: str) -> dict:
             "imported_locations": locations_count,
             "imported_employees": employees_count,
             "imported_assets": assets_count,
+            "imported_inventory_sessions": sessions_count,
+            "imported_inventory_items": items_count,
             "imported_write_off_acts": write_off_count,
             "finished_at": timezone.now().isoformat(),
             "duration_seconds": (timezone.now() - started_at).total_seconds(),
@@ -296,7 +399,7 @@ def _build_exchange_xml(session: InventorySession | None = None) -> str:
             inventory_sessions_root,
             "inventory_session",
             {
-                "id": str(inventory_session.id),
+                "id": inventory_session.external_1c_id or str(inventory_session.id),
                 "status": inventory_session.status,
                 "legal_entity_id": inventory_session.legal_entity.external_1c_id or str(inventory_session.legal_entity.id),
                 "legal_entity_name": inventory_session.legal_entity.name,
