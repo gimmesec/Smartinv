@@ -35,10 +35,28 @@ def _ensure_legal_entity(external_id: str, name: str = "", tax_id: str = "") -> 
     external_id = (external_id or "").strip()
     name = (name or "").strip() or f"Юрлицо {external_id or 'unknown'}"
     tax_id = (tax_id or "").strip() or (external_id or f"tmp-{uuid4().hex[:10]}")
-    legal_entity, _ = LegalEntity.objects.get_or_create(
-        external_1c_id=external_id,
-        defaults={"name": name, "tax_id": tax_id},
-    )
+    legal_entity = LegalEntity.objects.filter(external_1c_id=external_id).first() if external_id else None
+    if legal_entity is None and tax_id:
+        legal_entity = LegalEntity.objects.filter(tax_id=tax_id).first()
+        if legal_entity and external_id and legal_entity.external_1c_id != external_id:
+            legal_entity.external_1c_id = external_id
+            legal_entity.save(update_fields=["external_1c_id"])
+    if legal_entity is None:
+        legal_entity = LegalEntity.objects.create(
+            external_1c_id=external_id,
+            name=name,
+            tax_id=tax_id,
+        )
+    else:
+        updates: list[str] = []
+        if name and legal_entity.name != name:
+            legal_entity.name = name
+            updates.append("name")
+        if tax_id and legal_entity.tax_id != tax_id:
+            legal_entity.tax_id = tax_id
+            updates.append("tax_id")
+        if updates:
+            legal_entity.save(update_fields=updates)
     return legal_entity
 
 
@@ -71,13 +89,14 @@ def import_from_1c_xml(xml_payload: str) -> dict:
         if entities_root is not None:
             for node in entities_root.findall("legal_entity"):
                 external_id = _safe_attr(node, "id")
-                defaults = {
-                    "name": _safe_attr(node, "name") or "Без названия",
-                    "tax_id": _safe_attr(node, "tax_id") or external_id or f"tmp-{datetime.now().timestamp()}",
-                    "kpp": _safe_attr(node, "kpp"),
-                    "address": _safe_attr(node, "address"),
-                }
-                LegalEntity.objects.update_or_create(external_1c_id=external_id, defaults=defaults)
+                legal_entity = _ensure_legal_entity(
+                    external_id=external_id,
+                    name=_safe_attr(node, "name") or "Без названия",
+                    tax_id=_safe_attr(node, "tax_id") or external_id or f"tmp-{datetime.now().timestamp()}",
+                )
+                legal_entity.kpp = _safe_attr(node, "kpp")
+                legal_entity.address = _safe_attr(node, "address")
+                legal_entity.save(update_fields=["kpp", "address"])
                 entities_count += 1
 
         locations_root = root.find("locations")
@@ -123,6 +142,8 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                 legal_entity = LegalEntity.objects.filter(external_1c_id=entity_external_id).first() or _ensure_legal_entity(
                     entity_external_id
                 )
+                asset_external_id = _safe_attr(node, "id")
+                inventory_number = _safe_attr(node, "inventory_number") or f"inv-{uuid4().hex[:10]}"
                 employee_external_id = _safe_attr(node, "employee_id")
                 location_external_id = _safe_attr(node, "location_id")
                 responsible_employee = None
@@ -144,21 +165,50 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                             "type": Location.LocationType.ROOM,
                         },
                     )
-                Asset.objects.update_or_create(
-                    external_1c_id=_safe_attr(node, "id"),
-                    defaults={
-                        "name": _safe_attr(node, "name") or "Без названия",
-                        "inventory_number": _safe_attr(node, "inventory_number")
-                        or f"inv-{uuid4().hex[:10]}",
-                        "serial_number": _safe_attr(node, "serial_number"),
-                        "legal_entity": legal_entity,
-                        "status": _safe_attr(node, "status") or Asset.AssetStatus.ACTIVE,
-                        "quantity": _safe_attr(node, "quantity") or "1.00",
-                        "unit_price": _safe_attr(node, "price") or "0.00",
-                        "responsible_employee": responsible_employee,
-                        "location": location,
-                    },
-                )
+
+                # 1) Пробуем найти актив по external_1c_id.
+                # 2) Если не нашли — считаем, что актив уже есть на балансе, и ищем по инвентарному номеру.
+                # 3) Если нашли по номеру — привязываем external_1c_id для идемпотентных последующих импортов.
+                asset = Asset.objects.filter(external_1c_id=asset_external_id).first() if asset_external_id else None
+                if asset is None and inventory_number:
+                    asset = Asset.objects.filter(inventory_number=inventory_number).first()
+                    if asset and asset_external_id and asset.external_1c_id != asset_external_id:
+                        asset.external_1c_id = asset_external_id
+                        asset.save(update_fields=["external_1c_id"])
+
+                asset_defaults = {
+                    "name": _safe_attr(node, "name") or "Без названия",
+                    "inventory_number": inventory_number,
+                    "serial_number": _safe_attr(node, "serial_number"),
+                    "legal_entity": legal_entity,
+                    "status": _safe_attr(node, "status") or Asset.AssetStatus.ACTIVE,
+                    "quantity": _safe_attr(node, "quantity") or "1.00",
+                    "unit_price": _safe_attr(node, "price") or "0.00",
+                    "responsible_employee": responsible_employee,
+                    "location": location,
+                }
+
+                if asset is None:
+                    asset = Asset.objects.create(
+                        external_1c_id=asset_external_id,
+                        **asset_defaults,
+                    )
+                else:
+                    for key, value in asset_defaults.items():
+                        setattr(asset, key, value)
+                    asset.save()
+
+                # Гарантируем коды для распознавания в мобильном приложении.
+                code_base = asset.external_1c_id or asset.inventory_number or str(asset.id)
+                updates: list[str] = []
+                if not (asset.qr_code or "").strip():
+                    asset.qr_code = f"QR-{code_base}"
+                    updates.append("qr_code")
+                if not (asset.barcode or "").strip():
+                    asset.barcode = f"BAR-{code_base}"
+                    updates.append("barcode")
+                if updates:
+                    asset.save(update_fields=updates)
                 assets_count += 1
 
         sessions_root = root.find("inventory_sessions")

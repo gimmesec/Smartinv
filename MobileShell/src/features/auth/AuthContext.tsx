@@ -49,6 +49,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTokens(stored);
           await fetchMe(stored.access);
         }
+      } catch {
+        setUser(null);
+        await setTokensPersisted(null);
       } finally {
         setLoading(false);
       }

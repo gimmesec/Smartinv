@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetPhoto,
     AssetCategory,
     Employee,
     InventoryItem,
@@ -98,12 +99,16 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Employee.objects.select_related("legal_entity", "user").all().order_by("full_name")
         user = self.request.user
-        if user.is_staff or user.is_superuser:
-            return queryset
-        employee = get_employee_for_user(user)
-        if not employee:
-            return queryset.none()
-        return queryset.filter(legal_entity_id=employee.legal_entity_id)
+        if not (user.is_staff or user.is_superuser):
+            employee = get_employee_for_user(user)
+            if not employee:
+                return queryset.none()
+            queryset = queryset.filter(legal_entity_id=employee.legal_entity_id)
+
+        legal_entity_id = self.request.query_params.get("legal_entity")
+        if legal_entity_id:
+            queryset = queryset.filter(legal_entity_id=legal_entity_id)
+        return queryset
 
 
 class AssetViewSet(viewsets.ModelViewSet):
@@ -113,6 +118,7 @@ class AssetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Asset.objects.select_related("legal_entity", "location", "category", "responsible_employee")
+            .prefetch_related("inventory_photos")
             .all()
             .order_by("-created_at")
         )
@@ -268,6 +274,30 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         if not employee:
             return queryset.none()
         return queryset.filter(asset__legal_entity_id=employee.legal_entity_id)
+
+    def _sync_asset_last_photo(self, item: InventoryItem, previous_photo_name: str | None = None):
+        if not item.photo:
+            return
+        current_name = item.photo.name
+        if previous_photo_name == current_name:
+            return
+        AssetPhoto.objects.create(
+            asset=item.asset,
+            session=item.session,
+            inventory_item=item,
+            photo=item.photo,
+        )
+        item.asset.photo = item.photo
+        item.asset.save(update_fields=["photo", "updated_at"])
+
+    def perform_create(self, serializer):
+        item = serializer.save()
+        self._sync_asset_last_photo(item)
+
+    def perform_update(self, serializer):
+        previous_photo_name = serializer.instance.photo.name if serializer.instance.photo else None
+        item = serializer.save()
+        self._sync_asset_last_photo(item, previous_photo_name=previous_photo_name)
 
 
 class TransferViewSet(viewsets.ModelViewSet):

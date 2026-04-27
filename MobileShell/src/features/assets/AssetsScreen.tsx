@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Image, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../../shared/api/client";
 import { API_BASE_URL } from "../../shared/config";
+import { AssetPhotoGallery } from "../../shared/components/AssetPhotoGallery";
 import { colors } from "../../shared/theme";
 import { Asset, LegalEntity, Location } from "../../shared/types";
 
@@ -47,18 +48,33 @@ export function AssetsScreen() {
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
+    setLoadError(null);
     try {
-      const [assetsRes, entitiesRes, locationsRes] = await Promise.all([
+      const [assetsRes, entitiesRes, locationsRes] = await Promise.allSettled([
         api.get<Asset[]>("/assets/"),
         api.get<LegalEntity[]>("/legal-entities/"),
         api.get<Location[]>("/locations/"),
       ]);
-      setItems(assetsRes.data);
-      setEntities(entitiesRes.data);
-      setLocations(locationsRes.data);
+      if (assetsRes.status === "fulfilled") {
+        setItems(assetsRes.value.data);
+      }
+      if (entitiesRes.status === "fulfilled") {
+        setEntities(entitiesRes.value.data);
+      }
+      if (locationsRes.status === "fulfilled") {
+        setLocations(locationsRes.value.data);
+      }
+      if (
+        assetsRes.status === "rejected" ||
+        entitiesRes.status === "rejected" ||
+        locationsRes.status === "rejected"
+      ) {
+        setLoadError("Часть данных не загрузилась. Проверьте соединение и обновите экран.");
+      }
       if (!isAdmin && user?.legal_entity_id) {
         setSelectedEntityId(user.legal_entity_id);
       }
@@ -123,7 +139,7 @@ export function AssetsScreen() {
           <Text style={styles.meta}>Инв. номер: {selectedAsset.inventory_number}</Text>
           <Text style={styles.meta}>Статус: {getStatusRu(selectedAsset.status)}</Text>
           <Text style={styles.meta}>Описание: {selectedAsset.description || "Нет описания"}</Text>
-          {photoUrl ? <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" /> : <Text style={styles.meta}>Фото не загружено</Text>}
+          <AssetPhotoGallery assetId={selectedAsset.id} basePhotoUrl={photoUrl} toMediaUrl={toMediaUrl} />
         </View>
       </SafeAreaView>
     );
@@ -132,6 +148,7 @@ export function AssetsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Активы</Text>
+      {loadError ? <Text style={styles.error}>{loadError}</Text> : null}
       {!selectedEntityId ? (
         <FlatList
           data={entities}
@@ -213,5 +230,5 @@ const styles = StyleSheet.create({
   name: { fontWeight: "700", marginBottom: 4, color: colors.textPrimary },
   meta: { color: colors.textSecondary },
   empty: { color: colors.textSecondary, marginTop: 10 },
-  photo: { width: "100%", height: 220, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: colors.border },
+  error: { color: colors.danger, marginBottom: 8 },
 });

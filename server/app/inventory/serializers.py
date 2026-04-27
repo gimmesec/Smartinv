@@ -1,4 +1,6 @@
 from rest_framework import serializers
+from django.db import DatabaseError
+from django.core.files.storage import default_storage
 
 from .models import (
     Asset,
@@ -39,6 +41,22 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
 
 class AssetSerializer(serializers.ModelSerializer):
+    def _resolve_latest_photo_url(self, obj: Asset):
+        try:
+            latest_inventory_photo = obj.inventory_photos.order_by("-created_at").values_list("photo", flat=True).first()
+            if latest_inventory_photo:
+                return default_storage.url(latest_inventory_photo)
+        except DatabaseError:
+            # Backward-compatible fallback while migration for AssetPhoto
+            # is not yet applied in the runtime database.
+            pass
+        return obj.photo.url if obj.photo else None
+
+    def to_representation(self, instance: Asset):
+        data = super().to_representation(instance)
+        data["photo"] = self._resolve_latest_photo_url(instance)
+        return data
+
     def validate(self, attrs):
         legal_entity = attrs.get("legal_entity") or getattr(self.instance, "legal_entity", None)
         employee = attrs.get("responsible_employee") if "responsible_employee" in attrs else getattr(

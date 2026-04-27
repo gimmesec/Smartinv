@@ -41,6 +41,7 @@ services:
              python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./app:/app
+      - media_data:/app/media
     ports:
       - "8000:8000"
 
@@ -63,3 +64,4 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
+  media_data:

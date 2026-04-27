@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../../shared/api/client";
@@ -18,6 +18,7 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(user?.legal_entity_id ?? null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>(user?.employee_id ? [user.employee_id] : []);
+  const [showConductors, setShowConductors] = useState(false);
   const [starting, setStarting] = useState(false);
 
   const getSessionStatusRu = (status: string) => {
@@ -31,18 +32,28 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
 
   useEffect(() => {
     (async () => {
-      const [sessionsRes, entitiesRes] = await Promise.all([
-        api.get<InventorySession[]>("/inventory-sessions/"),
-        api.get<LegalEntity[]>("/legal-entities/"),
-      ]);
-      setSessions(sessionsRes.data);
-      setLegalEntities(entitiesRes.data);
-      if (!selectedLegalEntityId && entitiesRes.data.length) {
-        const firstEntityId = entitiesRes.data[0].id;
-        setSelectedLegalEntityId(firstEntityId);
+      try {
+        const [sessionsRes, entitiesRes] = await Promise.all([
+          api.get<InventorySession[]>("/inventory-sessions/"),
+          api.get<LegalEntity[]>("/legal-entities/"),
+        ]);
+        setSessions(sessionsRes.data);
+        setLegalEntities(entitiesRes.data);
+        if (!selectedLegalEntityId && entitiesRes.data.length) {
+          const firstEntityId = entitiesRes.data[0].id;
+          setSelectedLegalEntityId(firstEntityId);
+        }
+      } catch {
+        Alert.alert("Ошибка", "Не удалось загрузить сессии инвентаризации.");
       }
     })();
   }, [selectedLegalEntityId]);
+
+  useEffect(() => {
+    if (!selectedLegalEntityId && user?.legal_entity_id) {
+      setSelectedLegalEntityId(user.legal_entity_id);
+    }
+  }, [selectedLegalEntityId, user?.legal_entity_id]);
 
   useEffect(() => {
     if (!selectedLegalEntityId || !isAdmin) {
@@ -94,6 +105,20 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
     }
   };
 
+  const selectedEmployeesLabel = useMemo(() => {
+    if (!isAdmin) {
+      return user?.employee_name || "Текущий сотрудник";
+    }
+    if (selectedEmployeeIds.length === 0) {
+      return "Не выбрано";
+    }
+    const selected = employees.filter((emp) => selectedEmployeeIds.includes(emp.id)).map((emp) => emp.full_name);
+    if (selected.length <= 2) {
+      return selected.join(", ");
+    }
+    return `${selected.slice(0, 2).join(", ")} +${selected.length - 2}`;
+  }, [employees, isAdmin, selectedEmployeeIds, user?.employee_name]);
+
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.titleHeader}>Сессии инвентаризации</Text>
@@ -110,49 +135,55 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
             </Pressable>
           </Pressable>
         )}
-        contentContainerStyle={{ paddingBottom: isAdmin ? 190 : 120 }}
-      />
-      <View style={styles.employeeBox}>
-        <Text style={styles.meta}>Юрлицо проведения:</Text>
-        <View style={styles.employeeWrap}>
-          {legalEntities.map((entity) => (
-            <Pressable
-              key={entity.id}
-              style={[styles.employeeChip, selectedLegalEntityId === entity.id && styles.employeeChipSelected]}
-              onPress={() => setSelectedLegalEntityId(entity.id)}
-            >
-              <Text style={styles.employeeChipText}>{entity.name}</Text>
-            </Pressable>
-          ))}
-        </View>
-        {isAdmin ? (
-          <>
-            <Text style={styles.meta}>Кто проводит (можно выбрать несколько):</Text>
+        ListFooterComponent={
+          <View style={styles.controlsBox}>
+            <Text style={styles.meta}>Юрлицо проведения:</Text>
             <View style={styles.employeeWrap}>
-              {employees.map((employee) => (
+              {legalEntities.map((entity) => (
                 <Pressable
-                  key={employee.id}
-                  style={[styles.employeeChip, selectedEmployeeIds.includes(employee.id) && styles.employeeChipSelected]}
-                  onPress={() =>
-                    setSelectedEmployeeIds((prev) =>
-                      prev.includes(employee.id) ? prev.filter((id) => id !== employee.id) : [...prev, employee.id]
-                    )
-                  }
+                  key={entity.id}
+                  style={[styles.employeeChip, selectedLegalEntityId === entity.id && styles.employeeChipSelected]}
+                  onPress={() => setSelectedLegalEntityId(entity.id)}
                 >
-                  <Text style={styles.employeeChipText}>
-                    {employee.full_name} ({employee.id})
-                  </Text>
+                  <Text style={styles.employeeChipText}>{entity.name}</Text>
                 </Pressable>
               ))}
             </View>
-          </>
-        ) : (
-          <Text style={styles.meta}>Кто проводит: {user?.employee_name || "Текущий сотрудник"}</Text>
-        )}
-      </View>
-      <Pressable style={[styles.actionButton, starting && { opacity: 0.7 }]} onPress={startConduct} disabled={starting}>
-        <Text style={styles.actionText}>{starting ? "Создаём..." : "Начать новую инвентаризацию"}</Text>
-      </Pressable>
+
+            <Pressable style={styles.dropdown} onPress={() => setShowConductors((prev) => !prev)}>
+              <Text style={styles.dropdownLabel}>Кто проводит:</Text>
+              <Text style={styles.dropdownValue}>{selectedEmployeesLabel}</Text>
+            </Pressable>
+
+            {showConductors ? (
+              isAdmin ? (
+                <View style={styles.employeeWrap}>
+                  {employees.map((employee) => (
+                    <Pressable
+                      key={employee.id}
+                      style={[styles.employeeChip, selectedEmployeeIds.includes(employee.id) && styles.employeeChipSelected]}
+                      onPress={() =>
+                        setSelectedEmployeeIds((prev) =>
+                          prev.includes(employee.id) ? prev.filter((id) => id !== employee.id) : [...prev, employee.id]
+                        )
+                      }
+                    >
+                      <Text style={styles.employeeChipText}>{employee.full_name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.meta}>{user?.employee_name || "Текущий сотрудник"}</Text>
+              )
+            ) : null}
+
+            <Pressable style={[styles.actionButton, starting && { opacity: 0.7 }]} onPress={startConduct} disabled={starting}>
+              <Text style={styles.actionText}>{starting ? "Создаём..." : "Начать новую инвентаризацию"}</Text>
+            </Pressable>
+          </View>
+        }
+        contentContainerStyle={{ paddingBottom: 20 }}
+      />
     </SafeAreaView>
   );
 }
@@ -165,27 +196,30 @@ const styles = StyleSheet.create({
   meta: { color: colors.textSecondary },
   linkButton: { marginTop: 8, alignSelf: "flex-start" },
   linkText: { color: colors.accent, fontWeight: "600" },
-  employeeBox: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 70,
+  controlsBox: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
     backgroundColor: colors.surface,
     padding: 10,
     gap: 8,
+    marginTop: 6,
   },
   employeeWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   employeeChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   employeeChipSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
   employeeChipText: { color: colors.textPrimary },
+  dropdown: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.inputBackground,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  dropdownLabel: { color: colors.textSecondary, fontSize: 12 },
+  dropdownValue: { color: colors.textPrimary, fontWeight: "600", marginTop: 2 },
   actionButton: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 12,
     borderRadius: 10,
     backgroundColor: colors.accent,
     paddingVertical: 12,

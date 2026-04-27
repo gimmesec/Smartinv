@@ -4,7 +4,7 @@ import { Camera } from "react-native-camera-kit";
 import { launchCamera } from "react-native-image-picker";
 import { api } from "../../shared/api/client";
 import { colors } from "../../shared/theme";
-import { Asset, InventoryItemResponse, InventorySession } from "../../shared/types";
+import { Asset, InventoryItemResponse, InventorySession, Location } from "../../shared/types";
 
 type Props = {
   sessionId: number;
@@ -14,15 +14,18 @@ type Props = {
 const CONDITION_OPTIONS = [
   { value: "ok", label: "Исправен" },
   { value: "damaged", label: "Поврежден" },
-  { value: "absent", label: "Отсутствует" },
 ];
 
 export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [session, setSession] = useState<InventorySession | null>(null);
   const [items, setItems] = useState<InventoryItemResponse[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [assetsPool, setAssetsPool] = useState<Asset[]>([]);
   const [resolvedAsset, setResolvedAsset] = useState<Asset | null>(null);
   const [conditionPickerVisible, setConditionPickerVisible] = useState(false);
+  const [mode, setMode] = useState<"scan" | "room">("scan");
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
   const [scannedCode, setScannedCode] = useState("");
   const [condition, setCondition] = useState("ok");
   const [comment, setComment] = useState("");
@@ -49,11 +52,32 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const selectedConditionLabel =
     CONDITION_OPTIONS.find((item) => item.value === condition)?.label || CONDITION_OPTIONS[0].label;
 
+  const roomAssets = useMemo(() => {
+    if (!selectedRoomId) {
+      return [];
+    }
+    return assetsPool.filter((asset) => asset.location === selectedRoomId);
+  }, [assetsPool, selectedRoomId]);
+
+  const roomLocations = useMemo(() => {
+    return locations.filter((location) => location.type === "room" || location.type === "office");
+  }, [locations]);
+
   const loadData = async () => {
     const sessionRes = await api.get<InventorySession>(`/inventory-sessions/${sessionId}/`);
-    const itemsRes = await api.get<InventoryItemResponse[]>("/inventory-items/", { params: { session: sessionId } });
+    const legalEntityId = sessionRes.data.legal_entity;
+    const [itemsRes, locationsRes, assetsRes] = await Promise.all([
+      api.get<InventoryItemResponse[]>("/inventory-items/", { params: { session: sessionId } }),
+      api.get<Location[]>("/locations/", { params: { legal_entity: legalEntityId } }),
+      api.get<Asset[]>("/assets/", { params: { legal_entity: legalEntityId } }),
+    ]);
     setSession(sessionRes.data);
     setItems(itemsRes.data);
+    setLocations(locationsRes.data);
+    setAssetsPool(assetsRes.data);
+    if (!selectedRoomId && sessionRes.data.location) {
+      setSelectedRoomId(sessionRes.data.location);
+    }
   };
 
   const findAssetByCode = async (code: string) => {
@@ -171,8 +195,16 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
       <Text style={styles.caption}>
         Состав инвентаризации формируете вы: сканируйте или вводите код, фиксируйте состояние и сохраняйте.
       </Text>
+      <View style={styles.modeWrap}>
+        <Pressable style={[styles.modeChip, mode === "scan" && styles.modeChipActive]} onPress={() => setMode("scan")}>
+          <Text style={styles.modeChipText}>Сканирование</Text>
+        </Pressable>
+        <Pressable style={[styles.modeChip, mode === "room" && styles.modeChipActive]} onPress={() => setMode("room")}>
+          <Text style={styles.modeChipText}>По помещению</Text>
+        </Pressable>
+      </View>
 
-      {scannerEnabled ? (
+      {mode === "scan" && scannerEnabled ? (
         <Camera
           style={styles.scanner}
           scanBarcode
@@ -183,8 +215,43 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
           }}
         />
       ) : (
-        <Text style={styles.muted}>Камера недоступна. Используйте ручной ввод.</Text>
+        <Text style={styles.muted}>
+          {mode === "scan" ? "Камера недоступна. Используйте ручной ввод." : "Выберите помещение и актив из списка ниже."}
+        </Text>
       )}
+
+      {mode === "room" ? (
+        <View style={styles.roomBox}>
+          <Text style={styles.meta}>Помещение</Text>
+          <View style={styles.roomWrap}>
+            {roomLocations.map((loc) => (
+              <Pressable
+                key={loc.id}
+                style={[styles.roomChip, selectedRoomId === loc.id && styles.roomChipActive]}
+                onPress={() => setSelectedRoomId(loc.id)}
+              >
+                <Text style={styles.roomChipText}>{loc.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.meta}>Активы помещения</Text>
+          <View style={styles.roomWrap}>
+            {roomAssets.map((asset) => (
+              <Pressable
+                key={asset.id}
+                style={styles.roomChip}
+                onPress={() => {
+                  setResolvedAsset(asset);
+                  setScannedCode(asset.inventory_number);
+                }}
+              >
+                <Text style={styles.roomChipText}>{asset.name}</Text>
+              </Pressable>
+            ))}
+            {selectedRoomId && roomAssets.length === 0 ? <Text style={styles.muted}>В этом помещении нет активов.</Text> : null}
+          </View>
+        </View>
+      ) : null}
 
       <TextInput
         style={styles.input}
@@ -284,6 +351,22 @@ const styles = StyleSheet.create({
   },
   inputText: { color: colors.textPrimary },
   muted: { color: colors.textSecondary },
+  modeWrap: { flexDirection: "row", gap: 8 },
+  modeChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+  },
+  modeChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
+  modeChipText: { color: colors.textPrimary, fontWeight: "600" },
+  roomBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface, padding: 10, gap: 8 },
+  roomWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  roomChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
+  roomChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
+  roomChipText: { color: colors.textPrimary },
   selectedCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: colors.surface },
   selectedTitle: { color: colors.textPrimary, fontWeight: "700", marginBottom: 4 },
   meta: { color: colors.textSecondary },

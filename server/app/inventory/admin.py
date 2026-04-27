@@ -8,6 +8,7 @@ from django.utils.html import format_html
 
 from .models import (
     Asset,
+    AssetPhoto,
     AssetCategory,
     Employee,
     InventoryItem,
@@ -88,7 +89,10 @@ class InventorySessionAdmin(admin.ModelAdmin):
     conductors.short_description = "Проводили"
 
     def export_xml_link(self, obj):
-        return format_html('<a class="button" href="{}/export-xml/">Экспорт сессии XML</a>', obj.id)
+        return format_html(
+            '<a class="button" style="white-space: nowrap;" href="{}/export-xml/">Экспорт XML</a>',
+            obj.id,
+        )
 
     export_xml_link.short_description = "Экспорт"
 
@@ -105,6 +109,14 @@ class InventorySessionAdmin(admin.ModelAdmin):
 class InventoryItemAdmin(admin.ModelAdmin):
     list_display = ("id", "session", "asset", "condition", "scanned_at")
     list_filter = ("condition",)
+
+
+@admin.register(AssetPhoto)
+class AssetPhotoAdmin(admin.ModelAdmin):
+    list_display = ("id", "asset", "session", "inventory_item", "created_at")
+    list_filter = ("session", "asset__legal_entity")
+    search_fields = ("asset__inventory_number", "asset__name")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(Transfer)

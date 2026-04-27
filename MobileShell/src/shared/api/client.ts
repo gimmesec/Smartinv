@@ -31,7 +31,16 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config as any;
-    if (!tokenAccessors || !originalRequest || originalRequest._retry || error.response?.status !== 401) {
+    const requestUrl = String(originalRequest?.url || "");
+    const isAuthEndpoint = requestUrl.includes("/auth/token/");
+    const skipAuthRefresh = Boolean(originalRequest?._skipAuthRefresh) || isAuthEndpoint;
+    if (
+      !tokenAccessors ||
+      !originalRequest ||
+      originalRequest._retry ||
+      error.response?.status !== 401 ||
+      skipAuthRefresh
+    ) {
       return Promise.reject(error);
     }
 
@@ -42,7 +51,7 @@ api.interceptors.response.use(
 
     if (!refreshInFlight) {
       refreshInFlight = api
-        .post<Tokens>("/auth/token/refresh/", { refresh: current.refresh })
+        .post<Tokens>("/auth/token/refresh/", { refresh: current.refresh }, { _skipAuthRefresh: true } as any)
         .then((res) => res.data)
         .catch(() => null)
         .finally(() => {

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { FlatList, Image, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { api } from "../../shared/api/client";
 import { API_BASE_URL } from "../../shared/config";
+import { AssetPhotoGallery } from "../../shared/components/AssetPhotoGallery";
 import { colors } from "../../shared/theme";
 import { Asset } from "../../shared/types";
 
@@ -57,7 +58,7 @@ export function MyResponsibleAssetsScreen() {
           <Text style={styles.meta}>Инв. номер: {selectedAsset.inventory_number}</Text>
           <Text style={styles.meta}>Статус: {getStatusRu(selectedAsset.status)}</Text>
           <Text style={styles.meta}>Описание: {selectedAsset.description || "Нет описания"}</Text>
-          {photoUrl ? <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" /> : <Text style={styles.meta}>Фото не загружено</Text>}
+          <AssetPhotoGallery assetId={selectedAsset.id} basePhotoUrl={photoUrl} toMediaUrl={toMediaUrl} />
         </View>
       </SafeAreaView>
     );
@@ -95,5 +96,4 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 10, backgroundColor: colors.surface },
   name: { fontWeight: "700", marginBottom: 4, color: colors.textPrimary },
   meta: { color: colors.textSecondary },
-  photo: { width: "100%", height: 220, borderRadius: 10, marginTop: 10, borderWidth: 1, borderColor: colors.border },
 });

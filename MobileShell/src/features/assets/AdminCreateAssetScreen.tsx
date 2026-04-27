@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Camera } from "react-native-camera-kit";
+import { launchCamera } from "react-native-image-picker";
 import { api } from "../../shared/api/client";
 import { colors } from "../../shared/theme";
 import { Employee, LegalEntity, Location } from "../../shared/types";
@@ -19,6 +21,8 @@ export function AdminCreateAssetScreen() {
   const [selectedLocation, setSelectedLocation] = useState<number | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -44,13 +48,17 @@ export function AdminCreateAssetScreen() {
       Alert.alert("Ошибка", "Заполните минимум: юрлицо, название и инвентарный номер.");
       return;
     }
+    if (!photoUri) {
+      Alert.alert("Фото обязательно", "Перед созданием актива сделайте фото.");
+      return;
+    }
     if (!selectedLocation && !selectedEmployee) {
       Alert.alert("Ошибка", "Нужно выбрать либо помещение, либо ответственного сотрудника.");
       return;
     }
     setSaving(true);
     try {
-      await api.post("/assets/", {
+      const created = await api.post<{ id: number; photo?: string | null }>("/assets/", {
         legal_entity: selectedEntity,
         name: name.trim(),
         inventory_number: inventoryNumber.trim(),
@@ -60,15 +68,36 @@ export function AdminCreateAssetScreen() {
         category: selectedCategory,
         status: "active",
       });
+      if (photoUri) {
+        const formData = new FormData();
+        formData.append("photo", {
+          uri: photoUri,
+          name: `asset-${Date.now()}.jpg`,
+          type: "image/jpeg",
+        } as any);
+        await api.patch(`/assets/${created.data.id}/`, formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      }
       Alert.alert("Готово", "Материальный актив создан.");
       setName("");
       setInventoryNumber("");
       setDescription("");
+      setPhotoUri(null);
       setSelectedLocation(null);
       setSelectedEmployee(null);
       setSelectedCategory(null);
-    } catch {
-      Alert.alert("Ошибка", "Не удалось создать актив.");
+    } catch (error: any) {
+      const data = error?.response?.data;
+      const detail =
+        typeof data === "string"
+          ? data
+          : data?.detail ||
+            data?.non_field_errors?.[0] ||
+            data?.inventory_number?.[0] ||
+            data?.responsible_employee?.[0] ||
+            data?.location?.[0];
+      Alert.alert("Ошибка", detail || "Не удалось создать актив.");
     } finally {
       setSaving(false);
     }
@@ -97,14 +126,37 @@ export function AdminCreateAssetScreen() {
         </View>
 
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Название актива" placeholderTextColor={colors.textSecondary} />
-        <TextInput
-          style={styles.input}
-          value={inventoryNumber}
-          onChangeText={setInventoryNumber}
-          placeholder="Инвентарный номер"
-          placeholderTextColor={colors.textSecondary}
-        />
+        <View style={styles.inline}>
+          <TextInput
+            style={[styles.input, styles.inlineInput]}
+            value={inventoryNumber}
+            onChangeText={setInventoryNumber}
+            placeholder="Инвентарный номер / QR / штрихкод"
+            placeholderTextColor={colors.textSecondary}
+          />
+          <Pressable style={styles.inlineButton} onPress={() => setScannerVisible(true)}>
+            <Text style={styles.inlineButtonText}>Сканировать</Text>
+          </Pressable>
+        </View>
         <TextInput style={styles.input} value={description} onChangeText={setDescription} placeholder="Описание" placeholderTextColor={colors.textSecondary} />
+        <Pressable
+          style={styles.photoButton}
+          onPress={async () => {
+            const result = await launchCamera({
+              mediaType: "photo",
+              cameraType: "back",
+              saveToPhotos: false,
+              quality: 0.7,
+            });
+            const photo = result.assets?.[0];
+            if (photo?.uri) {
+              setPhotoUri(photo.uri);
+            }
+          }}
+        >
+          <Text style={styles.photoButtonText}>{photoUri ? "Переснять фото актива" : "Сделать фото актива"}</Text>
+        </Pressable>
+        {photoUri ? <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" /> : null}
 
         <Text style={styles.label}>Помещение/локация</Text>
         <View style={styles.wrap}>
@@ -145,10 +197,30 @@ export function AdminCreateAssetScreen() {
           ))}
         </View>
 
-        <Pressable style={styles.button} onPress={submit} disabled={saving}>
+        <Pressable style={[styles.button, (!photoUri || saving) && { opacity: 0.7 }]} onPress={submit} disabled={saving || !photoUri}>
           <Text style={styles.buttonText}>{saving ? "Сохраняем..." : "Создать актив"}</Text>
         </Pressable>
       </ScrollView>
+      <Modal visible={scannerVisible} animationType="slide" onRequestClose={() => setScannerVisible(false)}>
+        <SafeAreaView style={styles.scannerContainer}>
+          <Text style={styles.scannerTitle}>Сканируйте QR/штрихкод</Text>
+          <Camera
+            style={styles.scanner}
+            scanBarcode
+            onReadCode={(event: { nativeEvent: { codeStringValue: string } }) => {
+              const code = event.nativeEvent.codeStringValue;
+              if (!code) {
+                return;
+              }
+              setInventoryNumber(code);
+              setScannerVisible(false);
+            }}
+          />
+          <Pressable style={styles.scannerCloseButton} onPress={() => setScannerVisible(false)}>
+            <Text style={styles.scannerCloseText}>Закрыть</Text>
+          </Pressable>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -169,6 +241,15 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
   chipText: { color: colors.textPrimary },
+  inline: { flexDirection: "row", alignItems: "center", gap: 8 },
+  inlineInput: { flex: 1 },
+  inlineButton: {
+    backgroundColor: colors.accent,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  inlineButtonText: { color: "#fff", fontWeight: "700" },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -176,6 +257,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.inputBackground,
     color: colors.textPrimary,
     padding: 10,
+  },
+  photoButton: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  photoButtonText: { color: colors.textPrimary, fontWeight: "600" },
+  photoPreview: {
+    width: "100%",
+    height: 220,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   button: {
     marginTop: 8,
@@ -185,4 +282,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { color: "#fff", fontWeight: "700" },
+  scannerContainer: { flex: 1, backgroundColor: colors.background, padding: 12 },
+  scannerTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: "700", marginBottom: 8 },
+  scanner: { flex: 1, borderRadius: 12, overflow: "hidden" },
+  scannerCloseButton: {
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 12,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+  },
+  scannerCloseText: { color: colors.textPrimary, fontWeight: "700" },
 });

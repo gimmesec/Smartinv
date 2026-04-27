@@ -161,6 +161,22 @@ class InventoryItem(TimeStampedModel):
         unique_together = ("session", "asset")
 
 
+class AssetPhoto(TimeStampedModel):
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="inventory_photos")
+    session = models.ForeignKey(InventorySession, on_delete=models.CASCADE, related_name="asset_photos")
+    inventory_item = models.ForeignKey(
+        InventoryItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_photos",
+    )
+    photo = models.ImageField(upload_to="inventory/assets-history/", blank=False, null=False)
+
+    def __str__(self) -> str:
+        return f"Фото актива {self.asset_id} ({self.created_at:%Y-%m-%d %H:%M:%S})"
+
+
 class Transfer(TimeStampedModel):
     class TransferStatus(models.TextChoices):
         PENDING = "pending", "Ожидает"
