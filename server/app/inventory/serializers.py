@@ -5,6 +5,7 @@ from django.core.files.storage import default_storage
 from .models import (
     Asset,
     AssetCategory,
+    AssetConditionJob,
     Employee,
     InventoryItem,
     InventorySession,
@@ -32,6 +33,33 @@ class AssetCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = AssetCategory
         fields = "__all__"
+
+
+class AssetConditionJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssetConditionJob
+        fields = (
+            "id",
+            "asset",
+            "status",
+            "vision_result",
+            "llm_summary",
+            "error_message",
+            "source_image",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "asset",
+            "status",
+            "vision_result",
+            "llm_summary",
+            "error_message",
+            "source_image",
+            "created_at",
+            "updated_at",
+        )
 
 
 class EmployeeSerializer(serializers.ModelSerializer):

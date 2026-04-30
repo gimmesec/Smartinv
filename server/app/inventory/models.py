@@ -161,6 +161,35 @@ class InventoryItem(TimeStampedModel):
         unique_together = ("session", "asset")
 
 
+class AssetConditionJob(TimeStampedModel):
+    """Очередь: ConvNeXt (vision) → GigaChat (llm)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "В очереди"
+        VISION_RUNNING = "vision_running", "Анализ изображения"
+        VISION_DONE = "vision_done", "Изображение обработано"
+        LLM_RUNNING = "llm_running", "Генерация текста"
+        COMPLETED = "completed", "Готово"
+        FAILED = "failed", "Ошибка"
+
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="condition_jobs")
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING, db_index=True)
+    vision_result = models.JSONField(default=dict, blank=True)
+    llm_summary = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    source_image = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Относительный путь файла внутри MEDIA_ROOT (например assets/photos/x.jpg).",
+    )
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"ConditionJob #{self.pk} asset={self.asset_id} {self.status}"
+
+
 class AssetPhoto(TimeStampedModel):
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="inventory_photos")
     session = models.ForeignKey(InventorySession, on_delete=models.CASCADE, related_name="asset_photos")

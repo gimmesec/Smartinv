@@ -94,3 +94,32 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    v = os.getenv(key)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "900"))
+CELERY_TASK_ROUTES = {
+    "inventory.tasks.run_vision_classification": {"queue": "vision"},
+    "inventory.tasks.run_gigachat_condition_summary": {"queue": "llm"},
+}
+
+# GigaChat: в Authorization для OAuth передаётся GIGACHAT_AUTH_KEY (часто строка вида "Basic <base64>").
+GIGACHAT_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY", "").strip()
+GIGACHAT_CLIENT_ID = os.getenv("GIGACHAT_CLIENT_ID", os.getenv("CLIENT_ID", "")).strip()
+GIGACHAT_SCOPE = os.getenv("GIGACHAT_SCOPE", os.getenv("SCOPE", "GIGACHAT_API_PERS")).strip()
+GIGACHAT_OAUTH_URL = os.getenv(
+    "GIGACHAT_OAUTH_URL",
+    "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+)
+GIGACHAT_API_BASE = os.getenv("GIGACHAT_API_BASE", "https://gigachat.devices.sberbank.ru/api/v1")
+GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat")
+GIGACHAT_VERIFY_SSL = _env_bool("GIGACHAT_VERIFY_SSL", True)

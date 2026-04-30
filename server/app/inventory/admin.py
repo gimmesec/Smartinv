@@ -8,6 +8,7 @@ from django.utils.html import format_html
 
 from .models import (
     Asset,
+    AssetConditionJob,
     AssetPhoto,
     AssetCategory,
     Employee,
@@ -64,6 +65,14 @@ class AssetAdmin(admin.ModelAdmin):
     list_display = ("inventory_number", "name", "status", "legal_entity", "external_1c_id")
     list_filter = ("status", "legal_entity")
     search_fields = ("inventory_number", "name", "external_1c_id")
+
+
+@admin.register(AssetConditionJob)
+class AssetConditionJobAdmin(admin.ModelAdmin):
+    list_display = ("id", "asset", "status", "created_at", "updated_at")
+    list_filter = ("status",)
+    search_fields = ("asset__inventory_number", "asset__name")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(InventorySession)

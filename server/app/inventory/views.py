@@ -1,4 +1,5 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from django.db import DatabaseError
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -9,6 +10,7 @@ from rest_framework import serializers
 
 from .models import (
     Asset,
+    AssetConditionJob,
     AssetPhoto,
     AssetCategory,
     Employee,
@@ -22,6 +24,7 @@ from .models import (
 )
 from .serializers import (
     AssetCategorySerializer,
+    AssetConditionJobSerializer,
     AssetSerializer,
     EmployeeSerializer,
     InventoryItemSerializer,
@@ -33,6 +36,7 @@ from .serializers import (
     WriteOffActSerializer,
 )
 from .services import assess_inventory_item_with_ai, export_to_1c_xml, import_from_1c_xml
+from .tasks import run_vision_classification
 
 
 def get_employee_for_user(user):
@@ -147,6 +151,55 @@ class AssetViewSet(viewsets.ModelViewSet):
             return Response([])
         queryset = self.get_queryset().filter(responsible_employee_id=employee.id)
         return Response(self.get_serializer(queryset, many=True).data)
+
+    @extend_schema(
+        summary="Запустить анализ состояния (ConvNeXt + GigaChat)",
+        description="Только для staff. Ставит задачу в очередь Redis: vision-воркер, затем LLM-воркер.",
+        responses={201: AssetConditionJobSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="condition-analyze")
+    def condition_analyze(self, request, pk=None):
+        user = request.user
+        if not user.is_authenticated or not user.is_staff:
+            return Response({"detail": "Доступно только администраторам."}, status=status.HTTP_403_FORBIDDEN)
+        asset = self.get_object()
+        rel = None
+        try:
+            latest = asset.inventory_photos.order_by("-created_at").values_list("photo", flat=True).first()
+            if latest:
+                rel = str(latest)
+        except DatabaseError:
+            pass
+        if not rel and asset.photo:
+            rel = str(asset.photo)
+        if not rel:
+            return Response({"detail": "У актива нет фотографии для анализа."}, status=status.HTTP_400_BAD_REQUEST)
+        job = AssetConditionJob.objects.create(asset=asset, status=AssetConditionJob.Status.PENDING, source_image=rel)
+        run_vision_classification.delay(job.id)
+        return Response(AssetConditionJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        summary="Статус / результат анализа состояния",
+        description="Только для staff. По умолчанию последняя задача; можно ?job_id=.",
+        responses={200: AssetConditionJobSerializer},
+    )
+    @action(detail=True, methods=["get"], url_path="condition-insight")
+    def condition_insight(self, request, pk=None):
+        user = request.user
+        if not user.is_authenticated or not user.is_staff:
+            return Response({"detail": "Доступно только администраторам."}, status=status.HTTP_403_FORBIDDEN)
+        asset = self.get_object()
+        job_id = request.query_params.get("job_id")
+        if job_id:
+            try:
+                job = AssetConditionJob.objects.get(pk=int(job_id), asset=asset)
+            except (ValueError, AssetConditionJob.DoesNotExist):
+                return Response({"detail": "Задача не найдена."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            job = AssetConditionJob.objects.filter(asset=asset).order_by("-created_at").first()
+            if not job:
+                return Response({"detail": "Анализы ещё не запускались."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(AssetConditionJobSerializer(job).data)
 
     @action(detail=True, methods=["post"], url_path="write-off")
     def write_off(self, request, pk=None):

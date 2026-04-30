@@ -1,8 +1,21 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { Camera } from "react-native-camera-kit";
 import { launchCamera } from "react-native-image-picker";
 import { api } from "../../shared/api/client";
+import { API_BASE_URL } from "../../shared/config";
 import { colors } from "../../shared/theme";
 import { Asset, InventoryItemResponse, InventorySession, Location } from "../../shared/types";
 
@@ -16,6 +29,32 @@ const CONDITION_OPTIONS = [
   { value: "damaged", label: "Поврежден" },
 ];
 
+function toMediaUrl(photoPath: string | null | undefined) {
+  if (!photoPath) {
+    return "";
+  }
+  if (photoPath.startsWith("http://") || photoPath.startsWith("https://")) {
+    return photoPath;
+  }
+  const origin = API_BASE_URL.replace(/\/api\/v1\/?$/, "");
+  return `${origin}${photoPath.startsWith("/") ? "" : "/"}${photoPath}`;
+}
+
+function collectLocationSubtreeIds(locations: Location[], rootId: number): Set<number> {
+  const ids = new Set<number>([rootId]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const loc of locations) {
+      if (loc.parent !== null && ids.has(loc.parent) && !ids.has(loc.id)) {
+        ids.add(loc.id);
+        added = true;
+      }
+    }
+  }
+  return ids;
+}
+
 export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [session, setSession] = useState<InventorySession | null>(null);
@@ -24,8 +63,7 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const [assetsPool, setAssetsPool] = useState<Asset[]>([]);
   const [resolvedAsset, setResolvedAsset] = useState<Asset | null>(null);
   const [conditionPickerVisible, setConditionPickerVisible] = useState(false);
-  const [mode, setMode] = useState<"scan" | "room">("scan");
-  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
+  const [missingModalVisible, setMissingModalVisible] = useState(false);
   const [scannedCode, setScannedCode] = useState("");
   const [condition, setCondition] = useState("ok");
   const [comment, setComment] = useState("");
@@ -34,7 +72,6 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
 
   useEffect(() => {
     (async () => {
-      // react-native-camera-kit requests permission from native layer.
       setHasPermission(true);
       await loadData();
     })();
@@ -52,16 +89,22 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const selectedConditionLabel =
     CONDITION_OPTIONS.find((item) => item.value === condition)?.label || CONDITION_OPTIONS[0].label;
 
-  const roomAssets = useMemo(() => {
-    if (!selectedRoomId) {
+  const expectedAssets = useMemo(() => {
+    if (!session) {
       return [];
     }
-    return assetsPool.filter((asset) => asset.location === selectedRoomId);
-  }, [assetsPool, selectedRoomId]);
+    const pool = assetsPool.filter((a) => a.status !== "written_off");
+    if (session.location) {
+      const subtree = collectLocationSubtreeIds(locations, session.location);
+      return pool.filter((a) => a.location !== null && subtree.has(a.location));
+    }
+    return pool;
+  }, [session, assetsPool, locations]);
 
-  const roomLocations = useMemo(() => {
-    return locations.filter((location) => location.type === "room" || location.type === "office");
-  }, [locations]);
+  const missingAssets = useMemo(() => {
+    const scannedIds = new Set(items.map((i) => i.asset));
+    return expectedAssets.filter((a) => !scannedIds.has(a.id));
+  }, [expectedAssets, items]);
 
   const loadData = async () => {
     const sessionRes = await api.get<InventorySession>(`/inventory-sessions/${sessionId}/`);
@@ -75,9 +118,6 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     setItems(itemsRes.data);
     setLocations(locationsRes.data);
     setAssetsPool(assetsRes.data);
-    if (!selectedRoomId && sessionRes.data.location) {
-      setSelectedRoomId(sessionRes.data.location);
-    }
   };
 
   const findAssetByCode = async (code: string) => {
@@ -85,9 +125,8 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     if (!cleanCode || !session?.legal_entity) {
       return null;
     }
-    const res = await api.get<Asset[]>("/assets/", { params: { legal_entity: session.legal_entity } });
     const found =
-      res.data.find(
+      assetsPool.find(
         (asset) => asset.inventory_number === cleanCode || asset.qr_code === cleanCode || asset.barcode === cleanCode
       ) || null;
     setResolvedAsset(found);
@@ -125,7 +164,6 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
         itemId = createRes.data.id;
       }
       await api.post(`/inventory-items/${itemId}/ai-analyze/`);
-      Alert.alert("Сохранено", `Актив ${found.inventory_number} добавлен в инвентаризацию.`);
       setComment("");
       setResolvedAsset(null);
       setScannedCode("");
@@ -145,7 +183,7 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     }
     const existing = items.find((item) => item.asset === found.id);
     if (!existing) {
-      Alert.alert("Сначала сохраните", "Сначала нажмите 'Сохранить результат', чтобы создать запись по активу.");
+      Alert.alert("Сначала сохраните", "Сначала нажмите «Далее», чтобы создать запись по активу.");
       return;
     }
 
@@ -170,7 +208,6 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
       await api.patch(`/inventory-items/${existing.id}/`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      Alert.alert("Готово", "Фото обновлено.");
       await loadData();
     } catch {
       Alert.alert("Ошибка", "Не удалось загрузить фото.");
@@ -191,127 +228,98 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Сессия #{sessionId}</Text>
-      <Text style={styles.caption}>
-        Состав инвентаризации формируете вы: сканируйте или вводите код, фиксируйте состояние и сохраняйте.
-      </Text>
-      <View style={styles.modeWrap}>
-        <Pressable style={[styles.modeChip, mode === "scan" && styles.modeChipActive]} onPress={() => setMode("scan")}>
-          <Text style={styles.modeChipText}>Сканирование</Text>
-        </Pressable>
-        <Pressable style={[styles.modeChip, mode === "room" && styles.modeChipActive]} onPress={() => setMode("room")}>
-          <Text style={styles.modeChipText}>По помещению</Text>
-        </Pressable>
-      </View>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Сессия #{sessionId}</Text>
+        <Text style={styles.caption}>
+          Отсканируйте предмет, при необходимости сделайте фото и нажмите «Далее». Повторяйте, пока не отметите всё, что видите.
+        </Text>
 
-      {mode === "scan" && scannerEnabled ? (
-        <Camera
-          style={styles.scanner}
-          scanBarcode
-          onReadCode={(event: { nativeEvent: { codeStringValue: string } }) => {
-            const code = event.nativeEvent.codeStringValue;
-            setScannedCode(code);
+        {missingAssets.length > 0 ? (
+          <Pressable style={styles.warningBanner} onPress={() => setMissingModalVisible(true)}>
+            <Text style={styles.warningTitle}>Внимание</Text>
+            <Text style={styles.warningText}>
+              Не обнаружено предметов: {missingAssets.length}. Нажмите, чтобы посмотреть список с фото.
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {scannerEnabled ? (
+          <Camera
+            style={styles.scanner}
+            scanBarcode
+            onReadCode={(event: { nativeEvent: { codeStringValue: string } }) => {
+              const code = event.nativeEvent.codeStringValue;
+              setScannedCode(code);
+              setResolvedAsset(null);
+            }}
+          />
+        ) : (
+          <Text style={styles.muted}>Камера недоступна. Используйте ручной ввод кода.</Text>
+        )}
+
+        <TextInput
+          style={styles.input}
+          value={scannedCode}
+          onChangeText={(value) => {
+            setScannedCode(value);
             setResolvedAsset(null);
           }}
+          placeholder="QR / штрихкод / инв. номер"
+          placeholderTextColor={colors.textSecondary}
         />
-      ) : (
-        <Text style={styles.muted}>
-          {mode === "scan" ? "Камера недоступна. Используйте ручной ввод." : "Выберите помещение и актив из списка ниже."}
-        </Text>
-      )}
+        <Pressable
+          style={[styles.lookupButton, !scannedCode.trim() && { opacity: 0.6 }]}
+          disabled={!scannedCode.trim()}
+          onPress={async () => {
+            const found = await findAssetByCode(scannedCode);
+            if (!found) {
+              Alert.alert("Не найдено", "Актив с таким кодом не найден.");
+            }
+          }}
+        >
+          <Text style={styles.lookupText}>Найти актив</Text>
+        </Pressable>
+        <Pressable style={styles.input} onPress={() => setConditionPickerVisible(true)}>
+          <Text style={styles.inputText}>Статус: {selectedConditionLabel}</Text>
+        </Pressable>
+        <TextInput
+          style={styles.input}
+          value={comment}
+          onChangeText={setComment}
+          placeholder="Комментарий"
+          placeholderTextColor={colors.textSecondary}
+        />
 
-      {mode === "room" ? (
-        <View style={styles.roomBox}>
-          <Text style={styles.meta}>Помещение</Text>
-          <View style={styles.roomWrap}>
-            {roomLocations.map((loc) => (
-              <Pressable
-                key={loc.id}
-                style={[styles.roomChip, selectedRoomId === loc.id && styles.roomChipActive]}
-                onPress={() => setSelectedRoomId(loc.id)}
-              >
-                <Text style={styles.roomChipText}>{loc.name}</Text>
-              </Pressable>
-            ))}
+        {resolvedAsset ? (
+          <View style={styles.selectedCard}>
+            <Text style={styles.selectedTitle}>Текущий актив: {resolvedAsset.name}</Text>
+            <Text style={styles.meta}>Инв. номер: {resolvedAsset.inventory_number}</Text>
+            <Text style={styles.meta}>Текущая запись: {currentItem ? "есть" : "пока нет"}</Text>
           </View>
-          <Text style={styles.meta}>Активы помещения</Text>
-          <View style={styles.roomWrap}>
-            {roomAssets.map((asset) => (
-              <Pressable
-                key={asset.id}
-                style={styles.roomChip}
-                onPress={() => {
-                  setResolvedAsset(asset);
-                  setScannedCode(asset.inventory_number);
-                }}
-              >
-                <Text style={styles.roomChipText}>{asset.name}</Text>
-              </Pressable>
-            ))}
-            {selectedRoomId && roomAssets.length === 0 ? <Text style={styles.muted}>В этом помещении нет активов.</Text> : null}
-          </View>
+        ) : null}
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryTitle}>Итог по сессии</Text>
+          <Text style={styles.meta}>Отмечено в инвентаризации: {items.length}</Text>
+          {session?.location ? (
+            <Text style={styles.metaSmall}>Ожидается по локации сессии: {expectedAssets.length} активов</Text>
+          ) : (
+            <Text style={styles.metaSmall}>Ожидается по юрлицу: {expectedAssets.length} активов (кроме списанных)</Text>
+          )}
+          <Pressable style={styles.finishButton} onPress={finishSession}>
+            <Text style={styles.finishButtonText}>Завершить инвентаризацию</Text>
+          </Pressable>
         </View>
-      ) : null}
 
-      <TextInput
-        style={styles.input}
-        value={scannedCode}
-        onChangeText={(value) => {
-          setScannedCode(value);
-          setResolvedAsset(null);
-        }}
-        placeholder="QR / штрихкод / инв. номер"
-        placeholderTextColor={colors.textSecondary}
-      />
-      <Pressable
-        style={[styles.lookupButton, !scannedCode.trim() && { opacity: 0.6 }]}
-        disabled={!scannedCode.trim()}
-        onPress={async () => {
-          const found = await findAssetByCode(scannedCode);
-          if (!found) {
-            Alert.alert("Не найдено", "Актив с таким кодом не найден.");
-          }
-        }}
-      >
-        <Text style={styles.lookupText}>Найти актив</Text>
-      </Pressable>
-      <Pressable style={styles.input} onPress={() => setConditionPickerVisible(true)}>
-        <Text style={styles.inputText}>Статус: {selectedConditionLabel}</Text>
-      </Pressable>
-      <TextInput
-        style={styles.input}
-        value={comment}
-        onChangeText={setComment}
-        placeholder="Комментарий"
-        placeholderTextColor={colors.textSecondary}
-      />
-
-      {resolvedAsset ? (
-        <View style={styles.selectedCard}>
-          <Text style={styles.selectedTitle}>Текущий актив: {resolvedAsset.name}</Text>
-          <Text style={styles.meta}>Инв. номер: {resolvedAsset.inventory_number}</Text>
-          <Text style={styles.meta}>
-            Текущая запись: {currentItem ? "есть" : "пока нет"}
-          </Text>
+        <View style={styles.bottomRow}>
+          <Pressable style={[styles.actionButton, saving && { opacity: 0.7 }]} onPress={submit} disabled={saving}>
+            <Text style={styles.actionText}>{saving ? "Сохраняем..." : "Далее"}</Text>
+          </Pressable>
+          <Pressable style={[styles.photoButton, uploadingPhoto && { opacity: 0.7 }]} onPress={makePhoto} disabled={uploadingPhoto}>
+            <Text style={styles.photoText}>{uploadingPhoto ? "Загрузка..." : "Сделать фото"}</Text>
+          </Pressable>
         </View>
-      ) : null}
-
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>Итог по сессии</Text>
-        <Text style={styles.meta}>Добавлено в инвентаризацию: {items.length}</Text>
-        <Pressable style={styles.finishButton} onPress={finishSession}>
-          <Text style={styles.finishButtonText}>Завершить инвентаризацию</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.bottomRow}>
-        <Pressable style={[styles.actionButton, saving && { opacity: 0.7 }]} onPress={submit} disabled={saving}>
-          <Text style={styles.actionText}>{saving ? "Сохраняем..." : "Сохранить результат"}</Text>
-        </Pressable>
-        <Pressable style={[styles.photoButton, uploadingPhoto && { opacity: 0.7 }]} onPress={makePhoto} disabled={uploadingPhoto}>
-          <Text style={styles.photoText}>{uploadingPhoto ? "Загрузка..." : "Сделать фото"}</Text>
-        </Pressable>
-      </View>
+      </ScrollView>
 
       <Modal visible={conditionPickerVisible} transparent animationType="fade" onRequestClose={() => setConditionPickerVisible(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setConditionPickerVisible(false)}>
@@ -332,14 +340,52 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
           </View>
         </Pressable>
       </Modal>
+
+      <Modal visible={missingModalVisible} animationType="slide" onRequestClose={() => setMissingModalVisible(false)}>
+        <SafeAreaView style={styles.missingModal}>
+          <View style={styles.missingHeader}>
+            <Text style={styles.missingTitle}>Не обнаружено ({missingAssets.length})</Text>
+            <Pressable onPress={() => setMissingModalVisible(false)} style={styles.missingClose}>
+              <Text style={styles.missingCloseText}>Закрыть</Text>
+            </Pressable>
+          </View>
+          <FlatList
+            data={missingAssets}
+            keyExtractor={(a) => String(a.id)}
+            contentContainerStyle={styles.missingList}
+            renderItem={({ item }) => {
+              const uri = toMediaUrl(item.photo);
+              return (
+                <View style={styles.missingCard}>
+                  {uri ? <Image source={{ uri }} style={styles.missingPhoto} resizeMode="cover" /> : <View style={styles.missingPhotoPlaceholder} />}
+                  <Text style={styles.missingName}>{item.name}</Text>
+                  <Text style={styles.missingMeta}>Инв. номер: {item.inventory_number}</Text>
+                </View>
+              );
+            }}
+            ListEmptyComponent={<Text style={styles.meta}>Все ожидаемые активы отмечены.</Text>}
+          />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 12, gap: 8, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.background },
+  scroll: { padding: 12, gap: 8, paddingBottom: 24 },
   title: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   caption: { color: colors.textSecondary, marginBottom: 6 },
+  warningBanner: {
+    borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: "rgba(220, 53, 69, 0.12)",
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  warningTitle: { color: colors.danger, fontWeight: "800", fontSize: 15 },
+  warningText: { color: colors.textPrimary, fontWeight: "600" },
   scanner: { height: 150, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
   input: {
     borderWidth: 1,
@@ -351,25 +397,10 @@ const styles = StyleSheet.create({
   },
   inputText: { color: colors.textPrimary },
   muted: { color: colors.textSecondary },
-  modeWrap: { flexDirection: "row", gap: 8 },
-  modeChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: colors.surface,
-  },
-  modeChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
-  modeChipText: { color: colors.textPrimary, fontWeight: "600" },
-  roomBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface, padding: 10, gap: 8 },
-  roomWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  roomChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  roomChipActive: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
-  roomChipText: { color: colors.textPrimary },
   selectedCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: colors.surface },
   selectedTitle: { color: colors.textPrimary, fontWeight: "700", marginBottom: 4 },
   meta: { color: colors.textSecondary },
+  metaSmall: { color: colors.textSecondary, fontSize: 12 },
   lookupButton: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -403,4 +434,30 @@ const styles = StyleSheet.create({
   modalOption: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10 },
   modalOptionActive: { borderColor: colors.accent, backgroundColor: colors.surfaceAlt },
   modalOptionText: { color: colors.textPrimary, fontWeight: "600" },
+  missingModal: { flex: 1, backgroundColor: colors.background },
+  missingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  missingTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: "700" },
+  missingClose: { paddingHorizontal: 12, paddingVertical: 8 },
+  missingCloseText: { color: colors.accent, fontWeight: "700" },
+  missingList: { padding: 12, gap: 12 },
+  missingCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  missingPhoto: { width: "100%", height: 160, borderRadius: 8, backgroundColor: colors.inputBackground },
+  missingPhotoPlaceholder: { width: "100%", height: 100, borderRadius: 8, backgroundColor: colors.inputBackground },
+  missingName: { color: colors.textPrimary, fontWeight: "700" },
+  missingMeta: { color: colors.textSecondary },
 });
