@@ -1,5 +1,7 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from django.db import DatabaseError
+from django.db.models import CharField, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -73,7 +75,7 @@ class LocationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
-        queryset = Location.objects.select_related("legal_entity", "parent").all().order_by("-created_at")
+        queryset = Location.objects.select_related("legal_entity").all().order_by("legal_entity__name", "name", "id")
         user = self.request.user
         if not (user.is_staff or user.is_superuser):
             employee = get_employee_for_user(user)
@@ -81,13 +83,8 @@ class LocationViewSet(viewsets.ModelViewSet):
                 return queryset.none()
             queryset = queryset.filter(legal_entity_id=employee.legal_entity_id)
         legal_entity_id = self.request.query_params.get("legal_entity")
-        parent_id = self.request.query_params.get("parent")
         if legal_entity_id:
             queryset = queryset.filter(legal_entity_id=legal_entity_id)
-        if parent_id == "null":
-            queryset = queryset.filter(parent__isnull=True)
-        elif parent_id:
-            queryset = queryset.filter(parent_id=parent_id)
         return queryset
 
 
@@ -175,8 +172,79 @@ class AssetViewSet(viewsets.ModelViewSet):
         if not rel:
             return Response({"detail": "У актива нет фотографии для анализа."}, status=status.HTTP_400_BAD_REQUEST)
         job = AssetConditionJob.objects.create(asset=asset, status=AssetConditionJob.Status.PENDING, source_image=rel)
-        run_vision_classification.delay(job.id)
+        run_vision_classification.apply_async(args=[job.id], queue="vision")
         return Response(AssetConditionJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        summary="Запустить массовый анализ состояния",
+        description=(
+            "Только для staff. Запускает анализ по всем активам выбранного юрлица "
+            "(опционально по помещению). В обработку берутся только активы с фото."
+        ),
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "legal_entity_id": {"type": "integer"},
+                    "location_id": {"type": "integer", "nullable": True},
+                },
+                "required": ["legal_entity_id"],
+            }
+        },
+        responses={200: OpenApiResponse(description="Список созданных задач")},
+    )
+    @action(detail=False, methods=["post"], url_path="condition-analyze-bulk")
+    def condition_analyze_bulk(self, request):
+        user = request.user
+        if not user.is_authenticated or not user.is_staff:
+            return Response({"detail": "Доступно только администраторам."}, status=status.HTTP_403_FORBIDDEN)
+
+        legal_entity_id = request.data.get("legal_entity_id")
+        location_id = request.data.get("location_id")
+        if not legal_entity_id:
+            return Response({"detail": "legal_entity_id обязателен."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            legal_entity_id = int(legal_entity_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "legal_entity_id должен быть числом."}, status=status.HTTP_400_BAD_REQUEST)
+        if location_id is not None:
+            try:
+                location_id = int(location_id)
+            except (TypeError, ValueError):
+                return Response({"detail": "location_id должен быть числом."}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = self.get_queryset().filter(legal_entity_id=legal_entity_id)
+        if location_id is not None:
+            queryset = queryset.filter(location_id=location_id)
+
+        created_jobs: list[AssetConditionJob] = []
+        skipped_no_photo = 0
+        for asset in queryset:
+            rel = None
+            try:
+                latest = asset.inventory_photos.order_by("-created_at").values_list("photo", flat=True).first()
+                if latest:
+                    rel = str(latest)
+            except DatabaseError:
+                pass
+            if not rel and asset.photo:
+                rel = str(asset.photo)
+            if not rel:
+                skipped_no_photo += 1
+                continue
+
+            job = AssetConditionJob.objects.create(asset=asset, status=AssetConditionJob.Status.PENDING, source_image=rel)
+            run_vision_classification.apply_async(args=[job.id], queue="vision")
+            created_jobs.append(job)
+
+        return Response(
+            {
+                "queued_jobs": AssetConditionJobSerializer(created_jobs, many=True).data,
+                "queued_count": len(created_jobs),
+                "skipped_no_photo": skipped_no_photo,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         summary="Статус / результат анализа состояния",
@@ -229,7 +297,16 @@ class InventorySessionViewSet(viewsets.ModelViewSet):
     serializer_class = InventorySessionSerializer
 
     def get_queryset(self):
-        queryset = InventorySession.objects.select_related("legal_entity", "location", "started_by").all()
+        queryset = (
+            InventorySession.objects.select_related("legal_entity", "location", "started_by")
+            .all()
+            .order_by(
+                "legal_entity__name",
+                Coalesce("location__name", Value(""), output_field=CharField()),
+                "-started_at",
+                "id",
+            )
+        )
         legal_entity_id = self.request.query_params.get("legal_entity")
         status_value = self.request.query_params.get("status")
         if legal_entity_id:
@@ -316,7 +393,15 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     serializer_class = InventoryItemSerializer
 
     def get_queryset(self):
-        queryset = InventoryItem.objects.select_related("session", "asset").all()
+        queryset = InventoryItem.objects.select_related(
+            "session",
+            "session__legal_entity",
+            "asset",
+            "asset__legal_entity",
+            "asset__location",
+            "asset__category",
+            "asset__responsible_employee",
+        ).all()
         session_id = self.request.query_params.get("session")
         if session_id:
             queryset = queryset.filter(session_id=session_id)

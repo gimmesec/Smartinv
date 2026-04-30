@@ -109,15 +109,54 @@ class AssetSerializer(serializers.ModelSerializer):
 
 
 class InventorySessionSerializer(serializers.ModelSerializer):
+    legal_entity_name = serializers.CharField(source="legal_entity.name", read_only=True)
+    location_name = serializers.CharField(source="location.name", read_only=True, allow_null=True)
+
     class Meta:
         model = InventorySession
-        fields = "__all__"
+        fields = (
+            "id",
+            "created_at",
+            "updated_at",
+            "legal_entity",
+            "legal_entity_name",
+            "location",
+            "location_name",
+            "started_by",
+            "conducted_by_employees",
+            "status",
+            "started_at",
+            "finished_at",
+            "external_1c_id",
+        )
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
+    """`asset` — id для записи; `asset_detail` — полный объект (чтобы клиент не терял активы при длинных списках)."""
+
+    asset_detail = AssetSerializer(source="asset", read_only=True)
+
     class Meta:
         model = InventoryItem
-        fields = "__all__"
+        fields = (
+            "id",
+            "session",
+            "asset",
+            "asset_detail",
+            "scanned_at",
+            "detected",
+            "detected_inventory_number",
+            "ocr_text",
+            "condition",
+            "ai_condition",
+            "ai_confidence",
+            "ai_provider",
+            "ai_comment",
+            "comment",
+            "photo",
+            "created_at",
+            "updated_at",
+        )
 
 
 class TransferSerializer(serializers.ModelSerializer):

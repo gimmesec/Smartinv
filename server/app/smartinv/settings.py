@@ -123,3 +123,14 @@ GIGACHAT_OAUTH_URL = os.getenv(
 GIGACHAT_API_BASE = os.getenv("GIGACHAT_API_BASE", "https://gigachat.devices.sberbank.ru/api/v1")
 GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat")
 GIGACHAT_VERIFY_SSL = _env_bool("GIGACHAT_VERIFY_SSL", True)
+
+# ConvNeXt: 5 классов состояния по фото. Веса после `python manage.py train_condition_classifier`.
+CONDITION_CLASSIFIER_WEIGHTS = os.getenv(
+    "CONDITION_CLASSIFIER_WEIGHTS",
+    str(BASE_DIR / "weights" / "asset_condition_convnext.pt"),
+).strip()
+# Папки с разметкой: <slug>/*.jpg (slug из inventory.ml.condition_classes.CLASS_SLUGS)
+CONDITION_TRAINING_DATA_DIR = os.getenv(
+    "CONDITION_TRAINING_DATA_DIR",
+    str(BASE_DIR / "training_data" / "asset_condition"),
+).strip()

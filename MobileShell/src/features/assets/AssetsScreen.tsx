@@ -28,16 +28,6 @@ function getStatusRu(status: string) {
   return map[status] ?? status;
 }
 
-function getLocationTypeRu(type: string) {
-  const map: Record<string, string> = {
-    office: "Офис",
-    building: "Здание",
-    floor: "Этаж",
-    room: "Помещение",
-  };
-  return map[type] ?? type;
-}
-
 export function AssetsScreen() {
   const { user } = useAuth();
   const isAdmin = !!user?.is_admin;
@@ -87,45 +77,19 @@ export function AssetsScreen() {
     load();
   }, [load]);
 
-  const rootLocations = useMemo(() => {
+  const entityLocations = useMemo(() => {
     if (!selectedEntityId) {
       return [];
     }
-    return locations.filter((loc) => loc.legal_entity === selectedEntityId && loc.parent === null);
+    return locations.filter((loc) => loc.legal_entity === selectedEntityId);
   }, [locations, selectedEntityId]);
-
-  const currentChildren = useMemo(() => {
-    if (!selectedEntityId) {
-      return [];
-    }
-    if (!selectedLocationId) {
-      return rootLocations;
-    }
-    return locations.filter((loc) => loc.legal_entity === selectedEntityId && loc.parent === selectedLocationId);
-  }, [locations, rootLocations, selectedEntityId, selectedLocationId]);
 
   const currentAssets = useMemo(() => {
     if (!selectedEntityId || !selectedLocationId) {
       return [];
     }
-    const queue = [selectedLocationId];
-    const subtree = new Set<number>();
-    while (queue.length) {
-      const id = queue.shift() as number;
-      if (subtree.has(id)) {
-        continue;
-      }
-      subtree.add(id);
-      locations
-        .filter((loc) => loc.parent === id)
-        .forEach((loc) => {
-          queue.push(loc.id);
-        });
-    }
-    return items.filter((asset) => asset.legal_entity === selectedEntityId && asset.location !== null && subtree.has(asset.location));
-  }, [items, locations, selectedEntityId, selectedLocationId]);
-
-  const showAssetsAtCurrentLevel = selectedLocationId !== null && currentChildren.length === 0;
+    return items.filter((asset) => asset.legal_entity === selectedEntityId && asset.location === selectedLocationId);
+  }, [items, selectedEntityId, selectedLocationId]);
 
   if (selectedAsset) {
     const photoUrl = toMediaUrl(selectedAsset.photo);
@@ -179,41 +143,42 @@ export function AssetsScreen() {
             {selectedLocationId ? (
               <Pressable
                 onPress={() => {
-                  const current = locations.find((loc) => loc.id === selectedLocationId);
-                  setSelectedLocationId(current?.parent ?? null);
+                  setSelectedLocationId(null);
                 }}
                 style={styles.breadcrumbButton}
               >
-                <Text style={styles.breadcrumbText}>{"<"} Уровень выше</Text>
+                <Text style={styles.breadcrumbText}>{"<"} Помещения</Text>
               </Pressable>
             ) : null}
           </View>
-          <FlatList
-            data={[
-              ...currentChildren.map((loc) => ({ type: "loc" as const, loc })),
-              ...(showAssetsAtCurrentLevel ? currentAssets.map((asset) => ({ type: "asset" as const, asset })) : []),
-            ]}
-            keyExtractor={(item) => (item.type === "loc" ? `loc-${item.loc.id}` : `asset-${item.asset.id}`)}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
-            renderItem={({ item }) => {
-              if (item.type === "loc") {
-                return (
-                  <Pressable style={styles.card} onPress={() => setSelectedLocationId(item.loc.id)}>
-                    <Text style={styles.name}>{item.loc.name}</Text>
-                    <Text style={styles.meta}>{getLocationTypeRu(item.loc.type)}</Text>
-                  </Pressable>
-                );
-              }
-              return (
-                <Pressable style={styles.card} onPress={() => setSelectedAsset(item.asset)}>
-                  <Text style={styles.name}>{item.asset.name}</Text>
-                  <Text style={styles.meta}>Инв. номер: {item.asset.inventory_number}</Text>
-                  <Text style={styles.meta}>Статус: {getStatusRu(item.asset.status)}</Text>
+          {!selectedLocationId ? (
+            <FlatList
+              data={entityLocations}
+              keyExtractor={(item) => String(item.id)}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
+              renderItem={({ item }) => (
+                <Pressable style={styles.card} onPress={() => setSelectedLocationId(item.id)}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.meta}>Помещение</Text>
                 </Pressable>
-              );
-            }}
-            ListEmptyComponent={<Text style={styles.empty}>Нет локаций или активов на этом уровне</Text>}
-          />
+              )}
+              ListEmptyComponent={<Text style={styles.empty}>Для юрлица не найдено помещений</Text>}
+            />
+          ) : (
+            <FlatList
+              data={currentAssets}
+              keyExtractor={(item) => `asset-${item.id}`}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
+              renderItem={({ item }) => (
+                <Pressable style={styles.card} onPress={() => setSelectedAsset(item)}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.meta}>Инв. номер: {item.inventory_number}</Text>
+                  <Text style={styles.meta}>Статус: {getStatusRu(item.status)}</Text>
+                </Pressable>
+              )}
+              ListEmptyComponent={<Text style={styles.empty}>В помещении пока нет активов</Text>}
+            />
+          )}
         </>
       )}
     </SafeAreaView>

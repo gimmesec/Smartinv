@@ -25,6 +25,14 @@ media/
 staticfiles/
 *.sqlite3
 
+# ConvNeXt: разметка и обученные веса (не коммитить сырые фото и checkpoint)
+server/app/training_data/asset_condition/**/*.jpg
+server/app/training_data/asset_condition/**/*.jpeg
+server/app/training_data/asset_condition/**/*.png
+server/app/training_data/asset_condition/**/*.webp
+server/app/training_data/asset_condition/**/*.bmp
+server/app/weights/asset_condition_convnext.pt
+
 # Node / React
 node_modules/
 build/

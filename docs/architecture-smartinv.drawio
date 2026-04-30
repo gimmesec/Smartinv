@@ -1,35 +1,59 @@
-<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36" version="29.6.4">
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36">
   <diagram id="smartinv-architecture-flat" name="SmartInv Architecture Flat">
-    <mxGraphModel dx="1426" dy="785" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+    <mxGraphModel dx="1664" dy="924" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
         <mxCell id="user" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f8ec;strokeColor=#c8dcb8;fontStyle=1;fontSize=20;align=center;verticalAlign=middle;" value="Пользователь" vertex="1">
-          <mxGeometry height="90" width="220" x="80" y="120" as="geometry" />
+          <mxGeometry height="90" width="220" x="410" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-8" edge="1" parent="1" source="mobile" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=3;" target="user">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="160" />
+              <mxPoint x="560" y="160" />
+            </Array>
+          </mxGeometry>
         </mxCell>
         <mxCell id="mobile" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf3ff;strokeColor=#8cb3d9;fontStyle=1;fontSize=18;align=center;verticalAlign=middle;" value="Мобильное приложение&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;сканирование / фото / фиксация состояния&lt;/font&gt;" vertex="1">
-          <mxGeometry height="130" width="330" x="380" y="100" as="geometry" />
+          <mxGeometry height="130" width="330" x="355" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-4" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=3;" target="queue">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="850" y="540" as="targetPoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf3ff;strokeColor=#8cb3d9;fontStyle=1;fontSize=18;align=center;verticalAlign=middle;" value="Бэкэнд / Django API&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;бизнес-логика, инвентаризация, запуск AI&lt;/font&gt;" vertex="1">
-          <mxGeometry height="130" width="360" x="830" y="100" as="geometry" />
+          <mxGeometry height="130" width="360" x="340" y="435" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-6" edge="1" parent="1" source="database" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=4;fillColor=#d5e8d4;strokeColor=#82b366;startArrow=openThin;startFill=0;endArrow=openThin;endFill=0;" target="backend">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="database" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef8f1;strokeColor=#8fbe9d;fontStyle=1;fontSize=18;align=center;verticalAlign=middle;" value="База данных&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;активы / фото / результаты / рекомендации&lt;/font&gt;" vertex="1">
-          <mxGeometry height="130" width="330" x="380" y="360" as="geometry" />
+          <mxGeometry height="130" width="330" x="355" y="640" as="geometry" />
         </mxCell>
         <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f8fc;strokeColor=#c9d6e2;fontStyle=1;fontSize=18;align=center;verticalAlign=middle;" value="Django-админ панель&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;ручное управление / import / export&lt;/font&gt;" vertex="1">
-          <mxGeometry height="120" width="330" x="380" y="620" as="geometry" />
+          <mxGeometry height="120" width="330" x="355" y="830" as="geometry" />
         </mxCell>
         <mxCell id="queue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2e8;strokeColor=#e9a96b;fontStyle=1;fontSize=17;align=center;verticalAlign=middle;" value="Очередь AI-задач&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;буфер пиковых запросов&lt;/font&gt;" vertex="1">
-          <mxGeometry height="110" width="160" x="840" y="320" as="geometry" />
+          <mxGeometry height="110" width="160" x="805" y="445" as="geometry" />
         </mxCell>
         <mxCell id="classifier" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2e8;strokeColor=#e9a96b;fontStyle=1;fontSize=17;align=center;verticalAlign=middle;" value="Классификатор&lt;br&gt;по фото&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;оценка состояния&lt;/font&gt;" vertex="1">
-          <mxGeometry height="110" width="160" x="1060" y="320" as="geometry" />
+          <mxGeometry height="110" width="160" x="1015" y="445" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-5" edge="1" parent="1" source="gigachat" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=3;fillColor=#ffe6cc;strokeColor=#d79b00;" target="mobile" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;Человек с полномочиями может запросить оценку материальных активов&lt;/font&gt;&lt;div&gt;&lt;b style=&quot;white-space: normal; background-color: rgb(236, 236, 236);&quot;&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;ConvNeXt-Tiny - классифицирует,&amp;nbsp;&lt;br&gt;LLM - Интерпретирует результат классификации&lt;/font&gt;&lt;/b&gt;&lt;/div&gt;">
+          <mxGeometry relative="1" x="-0.161" y="-45" as="geometry">
+            <mxPoint x="-1" as="offset" />
+            <Array as="points">
+              <mxPoint x="1440" y="275" />
+            </Array>
+          </mxGeometry>
         </mxCell>
         <mxCell id="gigachat" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2e8;strokeColor=#e9a96b;fontStyle=1;fontSize=17;align=center;verticalAlign=middle;" value="GigaChat / LLM&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;списать / не списать / проверить&lt;/font&gt;" vertex="1">
-          <mxGeometry height="110" width="180" x="1260" y="320" as="geometry" />
+          <mxGeometry height="110" width="180" x="1215" y="445" as="geometry" />
         </mxCell>
         <mxCell id="onec" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3f8ec;strokeColor=#b8c98b;fontStyle=1;fontSize=18;align=center;verticalAlign=middle;" value="1С УНФ&lt;br&gt;&lt;font style=&quot;font-size:13px;&quot;&gt;import / export XML&lt;/font&gt;" vertex="1">
-          <mxGeometry height="120" width="240" x="910" y="620" as="geometry" />
+          <mxGeometry height="120" width="240" x="885" y="830" as="geometry" />
         </mxCell>
         <mxCell id="e1" edge="1" parent="1" source="user" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#3b82f6;" target="mobile" value="">
           <mxGeometry relative="1" as="geometry" />
@@ -37,19 +61,7 @@
         <mxCell id="e2" edge="1" parent="1" source="mobile" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#3b82f6;" target="backend" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e3" edge="1" parent="1" source="backend" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#16a34a;" target="database" value="">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1010" y="260" />
-              <mxPoint x="770" y="260" />
-              <mxPoint x="770" y="425" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e4" edge="1" parent="1" source="database" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#16a34a;" target="admin" value="">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e5" edge="1" parent="1" source="backend" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#ea580c;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" target="queue" value="">
+        <mxCell id="e4" edge="1" parent="1" source="database" style="endArrow=block;endFill=1;strokeWidth=4;strokeColor=#82b366;fillColor=#d5e8d4;" target="admin" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e6" edge="1" parent="1" source="queue" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#ea580c;" target="classifier" value="">
@@ -58,16 +70,17 @@
         <mxCell id="e7" edge="1" parent="1" source="classifier" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#ea580c;" target="gigachat" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e8" edge="1" parent="1" source="gigachat" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#ea580c;" target="database" value="">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1350" y="520" />
-              <mxPoint x="545" y="520" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
         <mxCell id="e9" edge="1" parent="1" source="admin" style="endArrow=block;endFill=1;strokeWidth=3;strokeColor=#7c9d36;startArrow=block;startFill=1;" target="onec" value="">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;dashed=1;" value="" vertex="1">
+          <mxGeometry height="170" width="650" x="770" y="415" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-2" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 17px;&quot;&gt;&lt;b&gt;Модуль ИИ&lt;/b&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="30" width="120" x="1035" y="385" as="geometry" />
+        </mxCell>
+        <mxCell id="sikJC9WRXwH7Q52gY0HM-3" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;span style=&quot;font-size: 17px;&quot;&gt;&lt;b&gt;Celery + Redis + ConvNeXt-Tiny&lt;/b&gt;&lt;/span&gt;" vertex="1">
+          <mxGeometry height="30" width="300" x="945" y="585" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

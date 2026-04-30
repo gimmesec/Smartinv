@@ -42,8 +42,8 @@ class LegalEntityAdmin(admin.ModelAdmin):
 
 @admin.register(Location)
 class LocationAdmin(admin.ModelAdmin):
-    list_display = ("name", "type", "legal_entity", "external_1c_id")
-    list_filter = ("type", "legal_entity")
+    list_display = ("name", "legal_entity", "external_1c_id")
+    list_filter = ("legal_entity",)
     search_fields = ("name", "external_1c_id")
 
 

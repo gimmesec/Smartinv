@@ -4,6 +4,9 @@ import React, { useState } from "react";
 import { ActivityIndicator, Pressable, SafeAreaView, Text } from "react-native";
 import { AdminCreateAssetScreen } from "../features/assets/AdminCreateAssetScreen";
 import { AssetsScreen } from "../features/assets/AssetsScreen";
+import { AdminCreateLegalEntityScreen } from "../features/admin/AdminCreateLegalEntityScreen";
+import { AdminCreateLocationScreen } from "../features/admin/AdminCreateLocationScreen";
+import { AssetConditionAssessmentScreen } from "../features/admin/AssetConditionAssessmentScreen";
 import { MyResponsibleAssetsScreen } from "../features/assets/MyResponsibleAssetsScreen";
 import { useAuth } from "../features/auth/AuthContext";
 import { LoginScreen } from "../features/auth/LoginScreen";
@@ -21,7 +24,13 @@ function InventoryEntryScreen() {
   const [startedSessionId, setStartedSessionId] = useState<number | null>(null);
 
   if (startedSessionId) {
-    return <InventoryScanScreen sessionId={startedSessionId} onFinish={() => setStartedSessionId(null)} />;
+    return (
+      <InventoryScanScreen
+        sessionId={startedSessionId}
+        onFinish={() => setStartedSessionId(null)}
+        onExit={() => setStartedSessionId(null)}
+      />
+    );
   }
   if (selectedSession) {
     return <InventorySessionDetailScreen session={selectedSession} onBack={() => setSelectedSession(null)} />;
@@ -66,14 +75,40 @@ function MainTabs() {
         }}
       />
       {isAdmin ? (
-        <Tabs.Screen
-          name="CreateAsset"
-          component={AdminCreateAssetScreen}
-          options={{
-            title: "Добавить актив",
-            tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>➕</Text>,
-          }}
-        />
+        <>
+          <Tabs.Screen
+            name="CreateAsset"
+            component={AdminCreateAssetScreen}
+            options={{
+              title: "Добавить актив",
+              tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>➕</Text>,
+            }}
+          />
+          <Tabs.Screen
+            name="CreateLegalEntity"
+            component={AdminCreateLegalEntityScreen}
+            options={{
+              title: "Юрлица",
+              tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>🏢</Text>,
+            }}
+          />
+          <Tabs.Screen
+            name="CreateLocation"
+            component={AdminCreateLocationScreen}
+            options={{
+              title: "Помещения",
+              tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>🧭</Text>,
+            }}
+          />
+          <Tabs.Screen
+            name="AssetConditionAssessment"
+            component={AssetConditionAssessmentScreen}
+            options={{
+              title: "Состояние",
+              tabBarIcon: ({ color, size }) => <Text style={{ color, fontSize: size }}>🤖</Text>,
+            }}
+          />
+        </>
       ) : (
         <Tabs.Screen
           name="MyResponsible"

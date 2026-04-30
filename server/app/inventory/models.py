@@ -23,23 +23,17 @@ class LegalEntity(TimeStampedModel):
 
 
 class Location(TimeStampedModel):
-    class LocationType(models.TextChoices):
-        OFFICE = "office", "Офис"
-        BUILDING = "building", "Здание"
-        FLOOR = "floor", "Этаж"
-        ROOM = "room", "Помещение"
+    """Помещение/площадка учёта в рамках юрлица (без иерархии этажей/офисов)."""
 
     legal_entity = models.ForeignKey(LegalEntity, on_delete=models.CASCADE, related_name="locations")
     name = models.CharField(max_length=255)
-    type = models.CharField(max_length=20, choices=LocationType.choices)
-    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE, related_name="children")
     external_1c_id = models.CharField(max_length=128, blank=True, db_index=True)
 
     class Meta:
-        unique_together = ("legal_entity", "name", "type", "parent")
+        unique_together = ("legal_entity", "name")
 
     def __str__(self) -> str:
-        return f"{self.name} [{self.get_type_display()}]"
+        return self.name
 
 
 class AssetCategory(TimeStampedModel):

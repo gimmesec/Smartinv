@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -12,13 +15,43 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-def _auth_header() -> str:
-    key = (getattr(settings, "GIGACHAT_AUTH_KEY", None) or "").strip()
+def _normalize_basic_credentials(raw: str) -> str:
+    """
+    GigaChat OAuth ожидает заголовок Authorization: Basic <base64(client_id:client_secret)>.
+
+    В .env часто копируют:
+    - только Base64-тело без `=` в конце (некорректная длина) — сервер отвечает «Can't decode Authorization header»;
+    - пару `client_id:client_secret` без Base64 — нужно закодировать.
+    - уже готовую строку `Basic ...`.
+    """
+    key = (raw or "").strip()
     if not key:
         raise RuntimeError("GIGACHAT_AUTH_KEY не задан")
-    if not key.lower().startswith("basic "):
-        return f"Basic {key}"
-    return key
+    if key.lower().startswith("basic "):
+        return key
+
+    # Явная пара id:secret (как в кабинете, если скопировали не Base64)
+    if ":" in key and not re.fullmatch(r"[A-Za-z0-9+/=]+", key):
+        token = base64.b64encode(key.encode("utf-8")).decode("ascii")
+        return f"Basic {token}"
+
+    # Только Base64-тело (возможно без padding)
+    body = key.replace(" ", "")
+    pad = (4 - len(body) % 4) % 4
+    padded = body + ("=" * pad)
+    try:
+        base64.b64decode(padded, validate=True)
+    except binascii.Error as exc:
+        raise RuntimeError(
+            "GIGACHAT_AUTH_KEY: не удалось разобрать как Base64. "
+            "Укажите либо полный ключ `Basic ...`, либо Base64 от `client_id:client_secret`, "
+            "либо пару `client_id:client_secret` одной строкой."
+        ) from exc
+    return f"Basic {padded}"
+
+
+def _auth_header() -> str:
+    return _normalize_basic_credentials(getattr(settings, "GIGACHAT_AUTH_KEY", "") or "")
 
 
 def fetch_access_token() -> str:
@@ -29,11 +62,23 @@ def fetch_access_token() -> str:
         "Authorization": _auth_header(),
         "RqUID": str(uuid.uuid4()),
         "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
     }
-    data = {"grant_type": "client_credentials", "scope": scope}
+
+    # В кабинете GigaChat часто приводят пример только со `scope`.
+    # `grant_type=client_credentials` поддерживается и обычно обязателен,
+    # но если сервер возвращает 400 на этом варианте — делаем безопасный fallback.
+    primary_data = {"grant_type": "client_credentials", "scope": scope}
+    fallback_data = {"scope": scope}
+
     with httpx.Client(verify=verify, timeout=60.0) as client:
-        r = client.post(url, headers=headers, data=data)
-    r.raise_for_status()
+        r = client.post(url, headers=headers, data=primary_data)
+        if r.status_code >= 400:
+            logger.warning("GigaChat OAuth primary HTTP %s: %s", r.status_code, r.text[:500])
+            r = client.post(url, headers=headers, data=fallback_data)
+    if r.status_code >= 400:
+        logger.warning("GigaChat OAuth fallback HTTP %s: %s", r.status_code, r.text[:500])
+        raise RuntimeError(f"GigaChat OAuth error {r.status_code}: {r.text[:500]}")
     body = r.json()
     token = body.get("access_token")
     if not token:

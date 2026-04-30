@@ -96,35 +96,17 @@ class Command(BaseCommand):
     def _seed_locations(self, entities):
         locations_map = {}
         for idx, entity in enumerate(entities, start=1):
-            office, _ = Location.objects.get_or_create(
-                legal_entity=entity,
-                name=f"Офис {idx}",
-                type=Location.LocationType.OFFICE,
-                parent=None,
-                defaults={"external_1c_id": f"1c-loc-office-{idx}"},
-            )
-            floor, _ = Location.objects.get_or_create(
-                legal_entity=entity,
-                name="Этаж 1",
-                type=Location.LocationType.FLOOR,
-                parent=office,
-                defaults={"external_1c_id": f"1c-loc-floor-{idx}"},
-            )
             room_it, _ = Location.objects.get_or_create(
                 legal_entity=entity,
                 name="IT кабинет",
-                type=Location.LocationType.ROOM,
-                parent=floor,
                 defaults={"external_1c_id": f"1c-loc-room-it-{idx}"},
             )
             room_acc, _ = Location.objects.get_or_create(
                 legal_entity=entity,
                 name="Бухгалтерия",
-                type=Location.LocationType.ROOM,
-                parent=floor,
                 defaults={"external_1c_id": f"1c-loc-room-acc-{idx}"},
             )
-            locations_map[entity.id] = {"office": office, "floor": floor, "it": room_it, "acc": room_acc}
+            locations_map[entity.id] = {"it": room_it, "acc": room_acc}
         return locations_map
 
     def _seed_employees(self, entities):
@@ -244,7 +226,7 @@ class Command(BaseCommand):
             completed_session = (
                 InventorySession.objects.filter(
                     legal_entity=entity,
-                    location=locations_map[entity.id]["office"],
+                    location__isnull=True,
                     status=InventorySession.SessionStatus.COMPLETED,
                 )
                 .order_by("id")
@@ -253,7 +235,7 @@ class Command(BaseCommand):
             if not completed_session:
                 completed_session = InventorySession.objects.create(
                     legal_entity=entity,
-                    location=locations_map[entity.id]["office"],
+                    location=None,
                     status=InventorySession.SessionStatus.COMPLETED,
                     started_by=started_by_user,
                     finished_at=now - timedelta(days=1),

@@ -6,11 +6,13 @@ import { InventoryItemResponse } from "../types";
 
 type Props = {
   assetId: number;
+  /** Если задано, в галерею попадают только фото из этой сессии инвентаризации */
+  sessionId?: number | null;
   basePhotoUrl?: string | null;
   toMediaUrl: (photoPath: string | null) => string;
 };
 
-export function AssetPhotoGallery({ assetId, basePhotoUrl, toMediaUrl }: Props) {
+export function AssetPhotoGallery({ assetId, sessionId, basePhotoUrl, toMediaUrl }: Props) {
   const [inventoryItems, setInventoryItems] = useState<InventoryItemResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -40,10 +42,10 @@ export function AssetPhotoGallery({ assetId, basePhotoUrl, toMediaUrl }: Props) 
     };
     add(basePhotoUrl);
     inventoryItems
-      .filter((item) => item.asset === assetId)
+      .filter((item) => item.asset === assetId && (sessionId == null || item.session === sessionId))
       .forEach((item) => add(toMediaUrl(item.photo || null)));
     return urls;
-  }, [assetId, basePhotoUrl, inventoryItems, toMediaUrl]);
+  }, [assetId, sessionId, basePhotoUrl, inventoryItems, toMediaUrl]);
 
   if (loading) {
     return (

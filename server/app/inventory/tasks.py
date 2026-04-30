@@ -64,7 +64,7 @@ def run_vision_classification(self, job_id: int):
     job.status = Job.Status.VISION_DONE
     job.error_message = ""
     job.save(update_fields=["vision_result", "status", "error_message", "updated_at"])
-    run_gigachat_condition_summary.delay(job_id)
+    run_gigachat_condition_summary.apply_async(args=[job_id], queue="llm")
 
 
 @shared_task(bind=True, max_retries=2, default_retry_backoff=True)
@@ -72,6 +72,7 @@ def run_gigachat_condition_summary(self, job_id: int):
     from django.apps import apps
 
     from inventory.gigachat import chat_completion
+    from inventory.ml.condition_classes import gigachat_condition_system_prompt
     from inventory.ml.convnext_classifier import build_dynamics_context
 
     Job = apps.get_model("inventory", "AssetConditionJob")
@@ -88,16 +89,13 @@ def run_gigachat_condition_summary(self, job_id: int):
     dynamics = build_dynamics_context(asset.id)
     vision_json = json.dumps(job.vision_result, ensure_ascii=False, indent=2)[:8000]
 
-    system = (
-        "Ты помощник по учёту основных средств. Отвечай только на основе переданных JSON и текста. "
-        "Не выдумывай повреждений и не приписывай активу состояние, если данных недостаточно. "
-        "Если классы из ImageNet — явно скажи, что это технический зонд, а не оценка износа актива."
-    )
+    system = gigachat_condition_system_prompt()
     user = (
         f"Актив: {asset.name}, инв. № {asset.inventory_number}.\n\n"
-        f"Динамика и контекст:\n{dynamics}\n\n"
-        f"Результат визуального классификатора (JSON):\n{vision_json}\n\n"
-        "Кратко (3–6 предложений на русском): что можно сказать о внешнем виде по этим данным и насколько им можно доверять."
+        f"Динамика и контекст из учёта:\n{dynamics}\n\n"
+        f"Результат визуального классификатора (JSON, 5 классов состояния по фото):\n{vision_json}\n\n"
+        "Сформулируй вывод для ответственного за учёт: насколько снимок и модель позволяют судить о состоянии, "
+        "что означает топ‑1 класс (если есть), и какие действия разумны (перефотографировать, осмотреть лично и т.д.)."
     )
     try:
         summary = chat_completion(user, system)

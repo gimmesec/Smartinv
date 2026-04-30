@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, FlatList, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../../shared/api/client";
 import { colors } from "../../shared/theme";
-import { Employee, InventorySession, LegalEntity } from "../../shared/types";
+import { Employee, InventorySession, LegalEntity, Location } from "../../shared/types";
 
 type Props = {
   onOpenSession: (session: InventorySession) => void;
@@ -16,38 +17,43 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
   const [sessions, setSessions] = useState<InventorySession[]>([]);
   const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(user?.legal_entity_id ?? null);
+  /** null = вся территория юрлица; иначе id помещения для ожидаемого списка в сессии */
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<number[]>(user?.employee_id ? [user.employee_id] : []);
   const [showConductors, setShowConductors] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const getSessionStatusRu = (status: string) => {
-    const map: Record<string, string> = {
-      draft: "Черновик",
-      in_progress: "В процессе",
-      completed: "Завершена",
-    };
-    return map[status] ?? status;
-  };
+  const loadSessionsAndEntities = useCallback(async () => {
+    try {
+      const [sessionsRes, entitiesRes] = await Promise.all([
+        api.get<InventorySession[]>("/inventory-sessions/"),
+        api.get<LegalEntity[]>("/legal-entities/"),
+      ]);
+      setSessions(sessionsRes.data);
+      setLegalEntities(entitiesRes.data);
+      setSelectedLegalEntityId((prev) => prev ?? (entitiesRes.data[0]?.id ?? null));
+    } catch {
+      Alert.alert("Ошибка", "Не удалось загрузить сессии инвентаризации.");
+    }
+  }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [sessionsRes, entitiesRes] = await Promise.all([
-          api.get<InventorySession[]>("/inventory-sessions/"),
-          api.get<LegalEntity[]>("/legal-entities/"),
-        ]);
-        setSessions(sessionsRes.data);
-        setLegalEntities(entitiesRes.data);
-        if (!selectedLegalEntityId && entitiesRes.data.length) {
-          const firstEntityId = entitiesRes.data[0].id;
-          setSelectedLegalEntityId(firstEntityId);
-        }
-      } catch {
-        Alert.alert("Ошибка", "Не удалось загрузить сессии инвентаризации.");
-      }
-    })();
-  }, [selectedLegalEntityId]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadSessionsAndEntities();
+    }, [loadSessionsAndEntities])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadSessionsAndEntities();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadSessionsAndEntities]);
 
   useEffect(() => {
     if (!selectedLegalEntityId && user?.legal_entity_id) {
@@ -68,6 +74,17 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
     })();
   }, [isAdmin, selectedLegalEntityId]);
 
+  useEffect(() => {
+    if (!selectedLegalEntityId) {
+      setLocations([]);
+      return;
+    }
+    (async () => {
+      const res = await api.get<Location[]>("/locations/", { params: { legal_entity: selectedLegalEntityId } });
+      setLocations(res.data);
+    })();
+  }, [selectedLegalEntityId]);
+
   const startConduct = async () => {
     if (!selectedLegalEntityId) {
       Alert.alert("Выберите юрлицо", "Нужно указать юрлицо для проведения инвентаризации.");
@@ -83,14 +100,20 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
         params: { legal_entity: selectedLegalEntityId, status: "in_progress" },
       });
       const activeSession = activeSessionsRes.data[0];
-      const targetSession =
+      let targetSession =
         activeSession ||
         (
           await api.post<InventorySession>("/inventory-sessions/", {
             legal_entity: selectedLegalEntityId,
             status: "draft",
+            location: selectedLocationId,
           })
         ).data;
+      if (activeSession) {
+        await api.patch(`/inventory-sessions/${targetSession.id}/`, { location: selectedLocationId });
+        const refreshed = await api.get<InventorySession>(`/inventory-sessions/${targetSession.id}/`);
+        targetSession = refreshed.data;
+      }
       const payload = {
         legal_entity_id: selectedLegalEntityId,
         ...(isAdmin ? { employee_ids: selectedEmployeeIds } : {}),
@@ -125,10 +148,12 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
       <FlatList
         data={sessions}
         keyExtractor={(item) => String(item.id)}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         renderItem={({ item }) => (
           <Pressable style={styles.card}>
             <Text style={styles.title}>Сессия #{item.id}</Text>
-            <Text style={styles.meta}>Статус: {getSessionStatusRu(item.status)}</Text>
+            <Text style={styles.meta}>{item.legal_entity_name ?? "—"}</Text>
+            {item.location_name ? <Text style={styles.meta}>Помещение: {item.location_name}</Text> : null}
             <Text style={styles.meta}>Дата: {item.started_at ? new Date(item.started_at).toLocaleString("ru-RU") : "не указана"}</Text>
             <Pressable style={styles.linkButton} onPress={() => onOpenSession(item)}>
               <Text style={styles.linkText}>Подробнее</Text>
@@ -143,9 +168,34 @@ export function InventorySessionScreen({ onOpenSession, onStartSession }: Props)
                 <Pressable
                   key={entity.id}
                   style={[styles.employeeChip, selectedLegalEntityId === entity.id && styles.employeeChipSelected]}
-                  onPress={() => setSelectedLegalEntityId(entity.id)}
+                  onPress={() => {
+                    setSelectedLegalEntityId(entity.id);
+                    setSelectedLocationId(null);
+                  }}
                 >
                   <Text style={styles.employeeChipText}>{entity.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.meta}>Помещение (опционально)</Text>
+            <Text style={styles.hintSmall}>
+              Если выберете помещение, в инвентаризации будут ожидаться только активы, привязанные к нему. «Всё юрлицо» — по всему юрлицу.
+            </Text>
+            <View style={styles.employeeWrap}>
+              <Pressable
+                style={[styles.employeeChip, selectedLocationId === null && styles.employeeChipSelected]}
+                onPress={() => setSelectedLocationId(null)}
+              >
+                <Text style={styles.employeeChipText}>Всё юрлицо</Text>
+              </Pressable>
+              {locations.map((loc) => (
+                <Pressable
+                  key={loc.id}
+                  style={[styles.employeeChip, selectedLocationId === loc.id && styles.employeeChipSelected]}
+                  onPress={() => setSelectedLocationId(loc.id)}
+                >
+                  <Text style={styles.employeeChipText}>{loc.name}</Text>
                 </Pressable>
               ))}
             </View>
@@ -219,6 +269,7 @@ const styles = StyleSheet.create({
   },
   dropdownLabel: { color: colors.textSecondary, fontSize: 12 },
   dropdownValue: { color: colors.textPrimary, fontWeight: "600", marginTop: 2 },
+  hintSmall: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
   actionButton: {
     borderRadius: 10,
     backgroundColor: colors.accent,

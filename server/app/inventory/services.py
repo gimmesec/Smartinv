@@ -111,8 +111,6 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                     defaults={
                         "legal_entity": legal_entity,
                         "name": _safe_attr(node, "name") or "Без названия",
-                        "type": _safe_attr(node, "type") or Location.LocationType.ROOM,
-                        "parent": None,
                     },
                 )
                 locations_count += 1
@@ -162,7 +160,6 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                         defaults={
                             "legal_entity": legal_entity,
                             "name": f"Локация {location_external_id}",
-                            "type": Location.LocationType.ROOM,
                         },
                     )
 
@@ -213,7 +210,6 @@ def import_from_1c_xml(xml_payload: str) -> dict:
 
         sessions_root = root.find("inventory_sessions")
         if sessions_root is not None:
-            allowed_session_status = {c[0] for c in InventorySession.SessionStatus.choices}
             allowed_item_condition = {c[0] for c in InventoryItem.Condition.choices}
             for snode in sessions_root.findall("inventory_session"):
                 external_session_id = _safe_attr(snode, "id")
@@ -229,15 +225,16 @@ def import_from_1c_xml(xml_payload: str) -> dict:
                 loc_ext = _safe_attr(snode, "location_id")
                 if loc_ext:
                     location = Location.objects.filter(external_1c_id=loc_ext).first()
-                status = _safe_attr(snode, "status") or InventorySession.SessionStatus.DRAFT
-                if status not in allowed_session_status:
-                    status = InventorySession.SessionStatus.IN_PROGRESS
                 started_by = None
                 uid = _safe_attr(snode, "started_by_user_id")
                 if uid.isdigit():
                     started_by = User.objects.filter(pk=int(uid)).first()
                 started_at = _parse_iso_datetime(_safe_attr(snode, "started_at"))
                 finished_at = _parse_iso_datetime(_safe_attr(snode, "finished_at"))
+                # Пакет из 1С — уже проведённые документы; в SmartInv это всегда «Завершена», не «В процессе».
+                if not finished_at:
+                    finished_at = started_at or timezone.now()
+                status = InventorySession.SessionStatus.COMPLETED
                 session_defaults: dict = {
                     "legal_entity": legal_entity,
                     "location": location,
@@ -398,7 +395,6 @@ def _build_exchange_xml(session: InventorySession | None = None) -> str:
             {
                 "id": location.external_1c_id or str(location.id),
                 "name": location.name,
-                "type": location.type,
                 "legal_entity_id": location.legal_entity.external_1c_id or str(location.legal_entity.id),
             },
         )

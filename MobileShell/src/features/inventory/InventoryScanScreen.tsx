@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -21,7 +21,10 @@ import { Asset, InventoryItemResponse, InventorySession, Location } from "../../
 
 type Props = {
   sessionId: number;
+  /** После успешного «Завершить инвентаризацию» */
   onFinish: () => void;
+  /** Выйти из экрана сканирования (сессия остаётся «В процессе», если не завершена) */
+  onExit: () => void;
 };
 
 const CONDITION_OPTIONS = [
@@ -40,22 +43,16 @@ function toMediaUrl(photoPath: string | null | undefined) {
   return `${origin}${photoPath.startsWith("/") ? "" : "/"}${photoPath}`;
 }
 
-function collectLocationSubtreeIds(locations: Location[], rootId: number): Set<number> {
-  const ids = new Set<number>([rootId]);
-  let added = true;
-  while (added) {
-    added = false;
-    for (const loc of locations) {
-      if (loc.parent !== null && ids.has(loc.parent) && !ids.has(loc.id)) {
-        ids.add(loc.id);
-        added = true;
-      }
-    }
-  }
-  return ids;
+function statusRu(status: string) {
+  const map: Record<string, string> = {
+    draft: "Черновик",
+    in_progress: "В процессе",
+    completed: "Завершена",
+  };
+  return map[status] ?? status;
 }
 
-export function InventoryScanScreen({ sessionId, onFinish }: Props) {
+export function InventoryScanScreen({ sessionId, onFinish, onExit }: Props) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [session, setSession] = useState<InventorySession | null>(null);
   const [items, setItems] = useState<InventoryItemResponse[]>([]);
@@ -70,12 +67,26 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
+  const loadData = useCallback(async () => {
+    const sessionRes = await api.get<InventorySession>(`/inventory-sessions/${sessionId}/`);
+    const legalEntityId = sessionRes.data.legal_entity;
+    const [itemsRes, locationsRes, assetsRes] = await Promise.all([
+      api.get<InventoryItemResponse[]>("/inventory-items/", { params: { session: sessionId } }),
+      api.get<Location[]>("/locations/", { params: { legal_entity: legalEntityId } }),
+      api.get<Asset[]>("/assets/", { params: { legal_entity: legalEntityId } }),
+    ]);
+    setSession(sessionRes.data);
+    setItems(itemsRes.data);
+    setLocations(locationsRes.data);
+    setAssetsPool(assetsRes.data);
+  }, [sessionId]);
+
   useEffect(() => {
     (async () => {
       setHasPermission(true);
       await loadData();
     })();
-  }, []);
+  }, [loadData]);
 
   const scannerEnabled = useMemo(() => hasPermission === true, [hasPermission]);
 
@@ -95,30 +106,23 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     }
     const pool = assetsPool.filter((a) => a.status !== "written_off");
     if (session.location) {
-      const subtree = collectLocationSubtreeIds(locations, session.location);
-      return pool.filter((a) => a.location !== null && subtree.has(a.location));
+      return pool.filter((a) => a.location === session.location);
     }
     return pool;
-  }, [session, assetsPool, locations]);
+  }, [session, assetsPool]);
 
   const missingAssets = useMemo(() => {
     const scannedIds = new Set(items.map((i) => i.asset));
     return expectedAssets.filter((a) => !scannedIds.has(a.id));
   }, [expectedAssets, items]);
 
-  const loadData = async () => {
-    const sessionRes = await api.get<InventorySession>(`/inventory-sessions/${sessionId}/`);
-    const legalEntityId = sessionRes.data.legal_entity;
-    const [itemsRes, locationsRes, assetsRes] = await Promise.all([
-      api.get<InventoryItemResponse[]>("/inventory-items/", { params: { session: sessionId } }),
-      api.get<Location[]>("/locations/", { params: { legal_entity: legalEntityId } }),
-      api.get<Asset[]>("/assets/", { params: { legal_entity: legalEntityId } }),
-    ]);
-    setSession(sessionRes.data);
-    setItems(itemsRes.data);
-    setLocations(locationsRes.data);
-    setAssetsPool(assetsRes.data);
-  };
+  const sessionLocationLabel = useMemo(() => {
+    if (!session?.location) {
+      return "Область: всё юрлицо";
+    }
+    const loc = locations.find((l) => l.id === session.location);
+    return `Область: ${loc?.name || `помещение #${session.location}`}`;
+  }, [session, locations]);
 
   const findAssetByCode = async (code: string) => {
     const cleanCode = code.trim();
@@ -133,6 +137,27 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     return found;
   };
 
+  /** Строка инвентаризации для текущего актива (создаётся при необходимости — до «Далее» можно сделать фото). */
+  const ensureInventoryItem = async (found: Asset): Promise<InventoryItemResponse> => {
+    const itemsRes = await api.get<InventoryItemResponse[]>("/inventory-items/", { params: { session: sessionId } });
+    const existing = itemsRes.data.find((row) => row.asset === found.id);
+    if (existing) {
+      setItems(itemsRes.data);
+      return existing;
+    }
+    const createRes = await api.post<InventoryItemResponse>("/inventory-items/", {
+      session: sessionId,
+      asset: found.id,
+      detected: true,
+      detected_inventory_number: found.inventory_number,
+      condition,
+      comment,
+      ocr_text: scannedCode.trim() || found.inventory_number,
+    });
+    await loadData();
+    return createRes.data;
+  };
+
   const submit = async () => {
     try {
       const found = resolvedAsset || (await findAssetByCode(scannedCode));
@@ -141,29 +166,15 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
         return;
       }
       setSaving(true);
-      const existing = items.find((item) => item.asset === found.id);
-      let itemId = existing?.id;
-      if (existing) {
-        await api.patch(`/inventory-items/${existing.id}/`, {
-          detected: true,
-          detected_inventory_number: found.inventory_number,
-          condition,
-          comment,
-          ocr_text: scannedCode || found.inventory_number,
-        });
-      } else {
-        const createRes = await api.post("/inventory-items/", {
-          session: sessionId,
-          asset: found.id,
-          detected: true,
-          detected_inventory_number: found.inventory_number,
-          condition,
-          comment,
-          ocr_text: scannedCode || found.inventory_number,
-        });
-        itemId = createRes.data.id;
-      }
-      await api.post(`/inventory-items/${itemId}/ai-analyze/`);
+      const row = await ensureInventoryItem(found);
+      await api.patch(`/inventory-items/${row.id}/`, {
+        detected: true,
+        detected_inventory_number: found.inventory_number,
+        condition,
+        comment,
+        ocr_text: scannedCode.trim() || found.inventory_number,
+      });
+      await api.post(`/inventory-items/${row.id}/ai-analyze/`);
       setComment("");
       setResolvedAsset(null);
       setScannedCode("");
@@ -178,15 +189,9 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const makePhoto = async () => {
     const found = resolvedAsset || (await findAssetByCode(scannedCode));
     if (!found) {
-      Alert.alert("Выберите актив", "Сначала отсканируйте/введите код актива и сохраните результат инвентаризации.");
+      Alert.alert("Сначала найдите актив", "Отсканируйте или введите код и нажмите «Найти актив».");
       return;
     }
-    const existing = items.find((item) => item.asset === found.id);
-    if (!existing) {
-      Alert.alert("Сначала сохраните", "Сначала нажмите «Далее», чтобы создать запись по активу.");
-      return;
-    }
-
     const result = await launchCamera({
       mediaType: "photo",
       cameraType: "back",
@@ -199,13 +204,14 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
     }
     try {
       setUploadingPhoto(true);
+      const row = await ensureInventoryItem(found);
       const formData = new FormData();
       formData.append("photo", {
         uri: photo.uri,
         type: photo.type || "image/jpeg",
-        name: photo.fileName || `inventory-item-${existing.id}.jpg`,
+        name: photo.fileName || `inventory-item-${row.id}.jpg`,
       } as any);
-      await api.patch(`/inventory-items/${existing.id}/`, formData, {
+      await api.patch(`/inventory-items/${row.id}/`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await loadData();
@@ -219,20 +225,54 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
   const finishSession = async () => {
     try {
       await api.post(`/inventory-sessions/${sessionId}/complete/`);
-      Alert.alert("Готово", "Инвентаризация завершена.");
-      onFinish();
+      await loadData();
+      Alert.alert("Готово", "Инвентаризация переведена в статус «Завершена».", [{ text: "OK", onPress: onFinish }]);
     } catch {
       Alert.alert("Ошибка", "Не удалось завершить инвентаризацию.");
     }
   };
 
+  const confirmExit = () => {
+    Alert.alert("Выйти из сканирования?", "Сессия останется в статусе «В процессе», если вы её не завершили. Прогресс сохранён.", [
+      { text: "Отмена", style: "cancel" },
+      { text: "Выйти", style: "destructive", onPress: onExit },
+    ]);
+  };
+
+  const confirmFinish = () => {
+    Alert.alert("Завершить инвентаризацию?", "Статус сессии станет «Завершена». После этого добавлять сканы в эту сессию будет нельзя.", [
+      { text: "Отмена", style: "cancel" },
+      { text: "Завершить", onPress: () => void finishSession() },
+    ]);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.topBar}>
+        <Pressable onPress={confirmExit} style={styles.topBarBtn}>
+          <Text style={styles.topBarBtnText}>Выйти</Text>
+        </Pressable>
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle}>Сессия #{sessionId}</Text>
+          <Text style={styles.topBarMeta}>{session ? `Статус: ${statusRu(session.status)}` : "…"}</Text>
+          {session ? <Text style={styles.topBarMeta}>{sessionLocationLabel}</Text> : null}
+        </View>
+        <View style={styles.topBarSpacer} />
+      </View>
+
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Сессия #{sessionId}</Text>
+        <Text style={styles.stepsTitle}>Как пройти шаг</Text>
         <Text style={styles.caption}>
-          Отсканируйте предмет, при необходимости сделайте фото и нажмите «Далее». Повторяйте, пока не отметите всё, что видите.
+          1) Отсканируйте или введите код → «Найти актив».{"\n"}
+          2) При необходимости нажмите «Сделать фото» (камера откроется сразу; строка создаётся автоматически) — или
+          пропустите фото.{"\n"}
+          3) Выберите состояние и нажмите «Далее» — это сохраняет отметку и запускает проверку по тексту.
         </Text>
+
+        <Pressable style={styles.finishBanner} onPress={confirmFinish}>
+          <Text style={styles.finishBannerTitle}>Завершить инвентаризацию</Text>
+          <Text style={styles.finishBannerHint}>Нажмите здесь, когда всё отсканировано — статус станет «Завершена»</Text>
+        </Pressable>
 
         {missingAssets.length > 0 ? (
           <Pressable style={styles.warningBanner} onPress={() => setMissingModalVisible(true)}>
@@ -280,13 +320,13 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
           <Text style={styles.lookupText}>Найти актив</Text>
         </Pressable>
         <Pressable style={styles.input} onPress={() => setConditionPickerVisible(true)}>
-          <Text style={styles.inputText}>Статус: {selectedConditionLabel}</Text>
+          <Text style={styles.inputText}>Состояние по факту: {selectedConditionLabel}</Text>
         </Pressable>
         <TextInput
           style={styles.input}
           value={comment}
           onChangeText={setComment}
-          placeholder="Комментарий"
+          placeholder="Комментарий (необязательно)"
           placeholderTextColor={colors.textSecondary}
         />
 
@@ -294,7 +334,7 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
           <View style={styles.selectedCard}>
             <Text style={styles.selectedTitle}>Текущий актив: {resolvedAsset.name}</Text>
             <Text style={styles.meta}>Инв. номер: {resolvedAsset.inventory_number}</Text>
-            <Text style={styles.meta}>Текущая запись: {currentItem ? "есть" : "пока нет"}</Text>
+            <Text style={styles.meta}>Строка в сессии: {currentItem ? "есть (можно фото и «Далее»)" : "появится после «Сделать фото» или «Далее»"}</Text>
           </View>
         ) : null}
 
@@ -306,9 +346,6 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
           ) : (
             <Text style={styles.metaSmall}>Ожидается по юрлицу: {expectedAssets.length} активов (кроме списанных)</Text>
           )}
-          <Pressable style={styles.finishButton} onPress={finishSession}>
-            <Text style={styles.finishButtonText}>Завершить инвентаризацию</Text>
-          </Pressable>
         </View>
 
         <View style={styles.bottomRow}>
@@ -319,12 +356,13 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
             <Text style={styles.photoText}>{uploadingPhoto ? "Загрузка..." : "Сделать фото"}</Text>
           </Pressable>
         </View>
+        <Text style={styles.photoHint}>«Сделать фото» открывает камеру сразу. Закройте камеру без снимка, если фото не нужно.</Text>
       </ScrollView>
 
       <Modal visible={conditionPickerVisible} transparent animationType="fade" onRequestClose={() => setConditionPickerVisible(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setConditionPickerVisible(false)}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Выберите статус</Text>
+            <Text style={styles.modalTitle}>Выберите состояние</Text>
             {CONDITION_OPTIONS.map((option) => (
               <Pressable
                 key={option.value}
@@ -373,9 +411,34 @@ export function InventoryScanScreen({ sessionId, onFinish }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  scroll: { padding: 12, gap: 8, paddingBottom: 24 },
-  title: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  caption: { color: colors.textSecondary, marginBottom: 6 },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  topBarBtn: { paddingVertical: 8, paddingHorizontal: 10 },
+  topBarBtnText: { color: colors.accent, fontWeight: "700" },
+  topBarCenter: { flex: 1, alignItems: "center" },
+  topBarSpacer: { width: 56 },
+  topBarTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
+  topBarMeta: { color: colors.textSecondary, fontSize: 12 },
+  scroll: { padding: 12, gap: 8, paddingBottom: 32 },
+  stepsTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 16 },
+  caption: { color: colors.textSecondary, marginBottom: 4, lineHeight: 20 },
+  finishBanner: {
+    borderWidth: 1,
+    borderColor: colors.success,
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  finishBannerTitle: { color: colors.success, fontWeight: "800", fontSize: 16 },
+  finishBannerHint: { color: colors.textPrimary, fontSize: 13 },
   warningBanner: {
     borderWidth: 1,
     borderColor: colors.danger,
@@ -413,21 +476,12 @@ const styles = StyleSheet.create({
   lookupText: { color: colors.textPrimary, fontWeight: "700" },
   summaryCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, backgroundColor: colors.surface },
   summaryTitle: { color: colors.textPrimary, fontWeight: "700", marginBottom: 4 },
-  finishButton: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: colors.success,
-    borderRadius: 8,
-    paddingVertical: 8,
-    alignItems: "center",
-    backgroundColor: colors.surfaceAlt,
-  },
-  finishButtonText: { color: colors.success, fontWeight: "700" },
   bottomRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionButton: { flex: 1, backgroundColor: colors.accent, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   actionText: { color: "#fff", fontWeight: "700" },
   photoButton: { width: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingVertical: 12, backgroundColor: colors.surface },
   photoText: { color: colors.textPrimary, fontWeight: "700", fontSize: 12 },
+  photoHint: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 16 },
   modalCard: { borderRadius: 12, padding: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, gap: 8 },
   modalTitle: { color: colors.textPrimary, fontWeight: "700", marginBottom: 4 },
