@@ -6,6 +6,7 @@ from .models import (
     Asset,
     AssetCategory,
     AssetConditionJob,
+    AssetPhoto,
     Employee,
     InventoryItem,
     InventorySession,
@@ -46,6 +47,7 @@ class AssetConditionJobSerializer(serializers.ModelSerializer):
             "llm_summary",
             "error_message",
             "source_image",
+            "source_images",
             "created_at",
             "updated_at",
         )
@@ -57,6 +59,7 @@ class AssetConditionJobSerializer(serializers.ModelSerializer):
             "llm_summary",
             "error_message",
             "source_image",
+            "source_images",
             "created_at",
             "updated_at",
         )
@@ -106,6 +109,48 @@ class AssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Asset
         fields = "__all__"
+        read_only_fields = ("photo",)
+
+
+class AssetPhotoSerializer(serializers.ModelSerializer):
+    photo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetPhoto
+        fields = (
+            "id",
+            "asset",
+            "session",
+            "inventory_item",
+            "photo",
+            "photo_url",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "photo_url", "created_at", "updated_at")
+
+    def get_photo_url(self, obj: AssetPhoto):
+        if not obj.photo:
+            return None
+        return obj.photo.url
+
+    def validate(self, attrs):
+        asset = attrs.get("asset") or getattr(self.instance, "asset", None)
+        session = attrs.get("session") or getattr(self.instance, "session", None)
+        inventory_item = attrs.get("inventory_item") or getattr(self.instance, "inventory_item", None)
+
+        if inventory_item:
+            if asset and inventory_item.asset_id != asset.id:
+                raise serializers.ValidationError("inventory_item must belong to the selected asset.")
+            if session and inventory_item.session_id != session.id:
+                raise serializers.ValidationError("inventory_item must belong to the selected session.")
+            attrs.setdefault("asset", inventory_item.asset)
+            attrs.setdefault("session", inventory_item.session)
+
+        if session and asset and session.legal_entity_id != asset.legal_entity_id:
+            raise serializers.ValidationError("session and asset must belong to the same legal entity.")
+
+        return attrs
 
 
 class InventorySessionSerializer(serializers.ModelSerializer):

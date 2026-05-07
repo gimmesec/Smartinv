@@ -23,6 +23,7 @@ _lock = threading.Lock()
 _model = None
 _transform = None
 _weights_loaded: bool = False
+_weights_error: str = ""
 
 
 def _weights_path() -> Path:
@@ -43,11 +44,11 @@ def _build_model():
     return model, weights.transforms()
 
 
-def _load_checkpoint_into_model(model, path: Path) -> bool:
+def _load_checkpoint_into_model(model, path: Path) -> tuple[bool, str]:
     import torch
 
     if not path.is_file():
-        return False
+        return False, f"Файл весов не найден: {path}"
     try:
         try:
             payload = torch.load(path, map_location="cpu", weights_only=True)
@@ -55,38 +56,52 @@ def _load_checkpoint_into_model(model, path: Path) -> bool:
             payload = torch.load(path, map_location="cpu")
     except Exception as exc:  # noqa: BLE001
         logger.exception("Не удалось прочитать веса классификатора %s: %s", path, exc)
-        return False
+        return False, f"Не удалось прочитать файл весов: {exc}"
 
     state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+    checkpoint_num_classes = payload.get("num_classes") if isinstance(payload, dict) else None
+    checkpoint_class_slugs = payload.get("class_slugs") if isinstance(payload, dict) else None
+    if checkpoint_num_classes is not None and int(checkpoint_num_classes) != NUM_CONDITION_CLASSES:
+        return (
+            False,
+            f"Файл весов обучен на {checkpoint_num_classes} классов, а код ожидает {NUM_CONDITION_CLASSES}: {list(CLASS_SLUGS)}.",
+        )
+    if checkpoint_class_slugs is not None and list(checkpoint_class_slugs) != list(CLASS_SLUGS):
+        return (
+            False,
+            f"Файл весов обучен на классы {list(checkpoint_class_slugs)}, а код ожидает {list(CLASS_SLUGS)}.",
+        )
     try:
         model.load_state_dict(state, strict=True)
     except Exception as exc:  # noqa: BLE001
         logger.exception("state_dict не подошёл к модели (ожидается вывод train_condition_classifier): %s", exc)
-        return False
-    return True
+        return False, f"state_dict не подошёл к 4-классной модели ConvNeXt: {exc}"
+    return True, ""
 
 
 def _ensure_model():
-    global _model, _transform, _weights_loaded
+    global _model, _transform, _weights_loaded, _weights_error
     with _lock:
         if _model is not None:
             return
         model, transform = _build_model()
         path = _weights_path()
-        loaded = _load_checkpoint_into_model(model, path)
+        loaded, error = _load_checkpoint_into_model(model, path)
         model.eval()
         _model = model
         _transform = transform
         _weights_loaded = loaded
+        _weights_error = error
         if not loaded:
             logger.warning(
-                "Веса классификатора состояния не найдены или битые: %s. Запустите: python manage.py train_condition_classifier",
+                "Веса классификатора состояния не загружены: %s. %s Запустите: python manage.py train_condition_classifier",
                 path,
+                error,
             )
 
 
 def classify_image_file(abs_path: str) -> dict[str, Any]:
-    """JSON для поля vision_result: 5 классов + вероятности (если загружены веса)."""
+    """JSON для поля vision_result: N классов + вероятности (если загружены веса)."""
     import torch
     from PIL import Image
 
@@ -105,6 +120,7 @@ def classify_image_file(abs_path: str) -> dict[str, Any]:
         "class_labels_ru": list(CLASS_LABELS_RU),
         "weights_path": weights_path,
         "weights_loaded": _weights_loaded,
+        "weights_error": _weights_error,
     }
 
     if not _weights_loaded:
@@ -112,7 +128,7 @@ def classify_image_file(abs_path: str) -> dict[str, Any]:
             **meta,
             "mode": "untrained_placeholder",
             "message": (
-                "Файл обученных весов не найден или не подходит. "
+                "Файл обученных весов не найден или не подходит к текущей 4-классной схеме. "
                 "Разложите фото по папкам (см. CONDITION_TRAINING_DATA_DIR) и выполните: "
                 "python manage.py train_condition_classifier"
             ),
@@ -124,7 +140,7 @@ def classify_image_file(abs_path: str) -> dict[str, Any]:
     with torch.no_grad():
         logits = _model(tensor)
         probs = torch.softmax(logits, dim=1).squeeze(0)
-        values, indices = torch.topk(probs, k=min(5, probs.shape[0]))
+        values, indices = torch.topk(probs, k=min(NUM_CONDITION_CLASSES, probs.shape[0]))
         values = values.tolist()
         indices = indices.tolist()
 
@@ -146,7 +162,7 @@ def classify_image_file(abs_path: str) -> dict[str, Any]:
         "mode": "inference",
         "predictions": predictions,
         "top1": top1,
-        "note": "Вероятности — выход обученной головы ConvNeXt по вашим 5 классам; не заменяют акт приёмки.",
+        "note": f"Вероятности — выход обученной головы ConvNeXt по вашим {NUM_CONDITION_CLASSES} классам; не заменяют акт приёмки.",
     }
 
 

@@ -6,6 +6,7 @@ import base64
 import binascii
 import logging
 import re
+import time
 import uuid
 from typing import Any
 
@@ -13,6 +14,24 @@ import httpx
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+_token_cache: dict[str, Any] = {"access_token": "", "expires_at": 0.0}
+
+
+class GigaChatRateLimitError(RuntimeError):
+    def __init__(self, message: str, retry_after: int | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(response: httpx.Response) -> int | None:
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
 
 
 def _normalize_basic_credentials(raw: str) -> str:
@@ -55,6 +74,11 @@ def _auth_header() -> str:
 
 
 def fetch_access_token() -> str:
+    now = time.time()
+    cached = str(_token_cache.get("access_token") or "")
+    if cached and float(_token_cache.get("expires_at") or 0) > now:
+        return cached
+
     scope = getattr(settings, "GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
     url = getattr(settings, "GIGACHAT_OAUTH_URL", "https://ngw.devices.sberbank.ru:9443/api/v2/oauth")
     verify = getattr(settings, "GIGACHAT_VERIFY_SSL", True)
@@ -83,6 +107,17 @@ def fetch_access_token() -> str:
     token = body.get("access_token")
     if not token:
         raise RuntimeError(f"GigaChat OAuth: нет access_token в ответе: {body}")
+    expires_at = body.get("expires_at")
+    if expires_at:
+        try:
+            # GigaChat usually returns milliseconds since epoch.
+            expires_at_seconds = float(expires_at) / 1000
+        except (TypeError, ValueError):
+            expires_at_seconds = now + 25 * 60
+    else:
+        expires_at_seconds = now + 25 * 60
+    _token_cache["access_token"] = token
+    _token_cache["expires_at"] = max(now, expires_at_seconds - 60)
     return token
 
 
@@ -100,6 +135,10 @@ def chat_completion(user_prompt: str, system_prompt: str | None = None) -> str:
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     with httpx.Client(verify=verify, timeout=120.0) as client:
         r = client.post(url, headers=headers, json=payload)
+    if r.status_code == 429:
+        retry_after = _retry_after_seconds(r)
+        logger.warning("GigaChat HTTP 429: %s", r.text[:500])
+        raise GigaChatRateLimitError("GigaChat rate limit exceeded", retry_after=retry_after)
     if r.status_code >= 400:
         logger.warning("GigaChat HTTP %s: %s", r.status_code, r.text[:500])
     r.raise_for_status()

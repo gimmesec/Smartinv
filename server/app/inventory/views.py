@@ -1,5 +1,4 @@
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
-from django.db import DatabaseError
 from django.db.models import CharField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -27,6 +26,7 @@ from .models import (
 from .serializers import (
     AssetCategorySerializer,
     AssetConditionJobSerializer,
+    AssetPhotoSerializer,
     AssetSerializer,
     EmployeeSerializer,
     InventoryItemSerializer,
@@ -45,6 +45,24 @@ def get_employee_for_user(user):
     if not user or not user.is_authenticated:
         return None
     return Employee.objects.select_related("legal_entity").filter(user=user).first()
+
+
+def resolve_asset_photo_paths(asset: Asset) -> list[str]:
+    paths = [
+        str(path)
+        for path in asset.inventory_photos.order_by("created_at", "id").values_list("photo", flat=True)
+        if path
+    ]
+    if asset.photo:
+        paths.append(str(asset.photo))
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        result.append(path)
+    return result
 
 
 class IsAdminOrReadOnly(BasePermission):
@@ -160,18 +178,15 @@ class AssetViewSet(viewsets.ModelViewSet):
         if not user.is_authenticated or not user.is_staff:
             return Response({"detail": "Доступно только администраторам."}, status=status.HTTP_403_FORBIDDEN)
         asset = self.get_object()
-        rel = None
-        try:
-            latest = asset.inventory_photos.order_by("-created_at").values_list("photo", flat=True).first()
-            if latest:
-                rel = str(latest)
-        except DatabaseError:
-            pass
-        if not rel and asset.photo:
-            rel = str(asset.photo)
-        if not rel:
-            return Response({"detail": "У актива нет фотографии для анализа."}, status=status.HTTP_400_BAD_REQUEST)
-        job = AssetConditionJob.objects.create(asset=asset, status=AssetConditionJob.Status.PENDING, source_image=rel)
+        source_images = resolve_asset_photo_paths(asset)
+        if not source_images:
+            return Response({"detail": "У актива нет фотографий для анализа."}, status=status.HTTP_400_BAD_REQUEST)
+        job = AssetConditionJob.objects.create(
+            asset=asset,
+            status=AssetConditionJob.Status.PENDING,
+            source_image=source_images[0],
+            source_images=source_images,
+        )
         run_vision_classification.apply_async(args=[job.id], queue="vision")
         return Response(AssetConditionJobSerializer(job).data, status=status.HTTP_201_CREATED)
 
@@ -220,20 +235,17 @@ class AssetViewSet(viewsets.ModelViewSet):
         created_jobs: list[AssetConditionJob] = []
         skipped_no_photo = 0
         for asset in queryset:
-            rel = None
-            try:
-                latest = asset.inventory_photos.order_by("-created_at").values_list("photo", flat=True).first()
-                if latest:
-                    rel = str(latest)
-            except DatabaseError:
-                pass
-            if not rel and asset.photo:
-                rel = str(asset.photo)
-            if not rel:
+            source_images = resolve_asset_photo_paths(asset)
+            if not source_images:
                 skipped_no_photo += 1
                 continue
 
-            job = AssetConditionJob.objects.create(asset=asset, status=AssetConditionJob.Status.PENDING, source_image=rel)
+            job = AssetConditionJob.objects.create(
+                asset=asset,
+                status=AssetConditionJob.Status.PENDING,
+                source_image=source_images[0],
+                source_images=source_images,
+            )
             run_vision_classification.apply_async(args=[job.id], queue="vision")
             created_jobs.append(job)
 
@@ -291,6 +303,45 @@ class AssetViewSet(viewsets.ModelViewSet):
         asset.status = Asset.AssetStatus.WRITTEN_OFF
         asset.save(update_fields=["status", "updated_at"])
         return Response(WriteOffActSerializer(act).data, status=status.HTTP_201_CREATED)
+
+
+class AssetPhotoViewSet(viewsets.ModelViewSet):
+    serializer_class = AssetPhotoSerializer
+
+    def get_queryset(self):
+        queryset = AssetPhoto.objects.select_related(
+            "asset",
+            "asset__legal_entity",
+            "session",
+            "inventory_item",
+        ).all().order_by("-created_at", "-id")
+
+        asset_id = self.request.query_params.get("asset")
+        session_id = self.request.query_params.get("session")
+        inventory_item_id = self.request.query_params.get("inventory_item")
+        if asset_id:
+            queryset = queryset.filter(asset_id=asset_id)
+        if session_id:
+            queryset = queryset.filter(session_id=session_id)
+        if inventory_item_id:
+            queryset = queryset.filter(inventory_item_id=inventory_item_id)
+
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return queryset
+        employee = get_employee_for_user(user)
+        if not employee:
+            return queryset.none()
+        return queryset.filter(asset__legal_entity_id=employee.legal_entity_id)
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        photo = instance.photo
+        instance.delete()
+        if photo:
+            photo.delete(save=False)
 
 
 class InventorySessionViewSet(viewsets.ModelViewSet):
@@ -425,8 +476,6 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             inventory_item=item,
             photo=item.photo,
         )
-        item.asset.photo = item.photo
-        item.asset.save(update_fields=["photo", "updated_at"])
 
     def perform_create(self, serializer):
         item = serializer.save()

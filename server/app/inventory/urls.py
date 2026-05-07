@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AssetCategoryViewSet,
+    AssetPhotoViewSet,
     AssetViewSet,
     CurrentUserAPIView,
     EmployeeViewSet,
@@ -24,6 +25,7 @@ router.register("locations", LocationViewSet, basename="location")
 router.register("asset-categories", AssetCategoryViewSet, basename="asset-category")
 router.register("employees", EmployeeViewSet, basename="employee")
 router.register("assets", AssetViewSet, basename="asset")
+router.register("asset-photos", AssetPhotoViewSet, basename="asset-photo")
 router.register("inventory-sessions", InventorySessionViewSet, basename="inventory-session")
 router.register("inventory-items", InventoryItemViewSet, basename="inventory-item")
 router.register("transfers", TransferViewSet, basename="transfer")

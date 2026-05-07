@@ -104,6 +104,21 @@ class Asset(TimeStampedModel):
     def __str__(self) -> str:
         return f"{self.inventory_number} - {self.name}"
 
+    def save(self, *args, **kwargs):
+        code = (self.inventory_number or "").strip()
+        extra_update_fields: set[str] = set()
+        if code:
+            if not (self.qr_code or "").strip():
+                self.qr_code = code
+                extra_update_fields.add("qr_code")
+            if not (self.barcode or "").strip():
+                self.barcode = code
+                extra_update_fields.add("barcode")
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and extra_update_fields:
+            kwargs["update_fields"] = set(update_fields) | extra_update_fields
+        super().save(*args, **kwargs)
+
 
 class InventorySession(TimeStampedModel):
     class SessionStatus(models.TextChoices):
@@ -176,6 +191,7 @@ class AssetConditionJob(TimeStampedModel):
         blank=True,
         help_text="Относительный путь файла внутри MEDIA_ROOT (например assets/photos/x.jpg).",
     )
+    source_images = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -186,7 +202,13 @@ class AssetConditionJob(TimeStampedModel):
 
 class AssetPhoto(TimeStampedModel):
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="inventory_photos")
-    session = models.ForeignKey(InventorySession, on_delete=models.CASCADE, related_name="asset_photos")
+    session = models.ForeignKey(
+        InventorySession,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="asset_photos",
+    )
     inventory_item = models.ForeignKey(
         InventoryItem,
         on_delete=models.SET_NULL,

@@ -54,9 +54,16 @@ services:
       POSTGRES_PORT: 5432
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      # Infrastructure timeouts (app server + DB)
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-30}
+      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-30}
+      GUNICORN_KEEPALIVE: ${GUNICORN_KEEPALIVE:-5}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      POSTGRES_STATEMENT_TIMEOUT_MS: ${POSTGRES_STATEMENT_TIMEOUT_MS:-15000}
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
+      python manage.py collectstatic --noinput &&
+      exec gunicorn smartinv.wsgi:application --bind 0.0.0.0:8000 --workers ${WEB_CONCURRENCY:-2} --timeout ${GUNICORN_TIMEOUT:-30} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --keep-alive ${GUNICORN_KEEPALIVE:-5} --access-logfile - --error-logfile -"
     volumes:
       - ./app:/app
       - media_data:/app/media
@@ -88,7 +95,7 @@ services:
       POSTGRES_PORT: 5432
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-    command: ["celery", "-A", "smartinv", "worker", "-Q", "llm,celery", "-l", "INFO", "--concurrency", "2"]
+    command: ["celery", "-A", "smartinv", "worker", "-Q", "llm,celery", "-l", "INFO", "--concurrency", "1"]
     volumes:
       - ./app:/app
       - media_data:/app/media

@@ -61,6 +61,17 @@ export type AssetConditionJob = {
   updated_at: string;
 };
 
+export type AssetPhoto = {
+  id: number;
+  asset: number;
+  session: number | null;
+  inventory_item: number | null;
+  photo: string;
+  photo_url?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type InventorySession = {
   id: number;
   status: string;

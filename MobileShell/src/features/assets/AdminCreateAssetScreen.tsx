@@ -22,7 +22,7 @@ export function AdminCreateAssetScreen() {
   const [selectedEmployee, setSelectedEmployee] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export function AdminCreateAssetScreen() {
       Alert.alert("Ошибка", "Заполните минимум: юрлицо, название и инвентарный номер.");
       return;
     }
-    if (!photoUri) {
+    if (photoUris.length === 0) {
       Alert.alert("Фото обязательно", "Перед созданием актива сделайте фото.");
       return;
     }
@@ -68,14 +68,15 @@ export function AdminCreateAssetScreen() {
         category: selectedCategory,
         status: "active",
       });
-      if (photoUri) {
+      for (const [index, photoUri] of photoUris.entries()) {
         const formData = new FormData();
+        formData.append("asset", String(created.data.id));
         formData.append("photo", {
           uri: photoUri,
-          name: `asset-${Date.now()}.jpg`,
+          name: `asset-${created.data.id}-${Date.now()}-${index + 1}.jpg`,
           type: "image/jpeg",
         } as any);
-        await api.patch(`/assets/${created.data.id}/`, formData, {
+        await api.post("/asset-photos/", formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
       }
@@ -83,7 +84,7 @@ export function AdminCreateAssetScreen() {
       setName("");
       setInventoryNumber("");
       setDescription("");
-      setPhotoUri(null);
+      setPhotoUris([]);
       setSelectedLocation(null);
       setSelectedEmployee(null);
       setSelectedCategory(null);
@@ -150,13 +151,28 @@ export function AdminCreateAssetScreen() {
             });
             const photo = result.assets?.[0];
             if (photo?.uri) {
-              setPhotoUri(photo.uri);
+              const uri = photo.uri;
+              setPhotoUris((prev) => [...prev, uri]);
             }
           }}
         >
-          <Text style={styles.photoButtonText}>{photoUri ? "Переснять фото актива" : "Сделать фото актива"}</Text>
+          <Text style={styles.photoButtonText}>{photoUris.length > 0 ? "Добавить ещё фото актива" : "Сделать фото актива"}</Text>
         </Pressable>
-        {photoUri ? <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" /> : null}
+        {photoUris.length > 0 ? (
+          <View style={styles.photoGrid}>
+            {photoUris.map((uri, index) => (
+              <View key={`${uri}-${index}`} style={styles.photoTile}>
+                <Image source={{ uri }} style={styles.photoPreview} resizeMode="cover" />
+                <Pressable
+                  style={styles.removePhotoButton}
+                  onPress={() => setPhotoUris((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                >
+                  <Text style={styles.removePhotoText}>Удалить</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <Text style={styles.label}>Помещение/локация</Text>
         <View style={styles.wrap}>
@@ -197,7 +213,7 @@ export function AdminCreateAssetScreen() {
           ))}
         </View>
 
-        <Pressable style={[styles.button, (!photoUri || saving) && { opacity: 0.7 }]} onPress={submit} disabled={saving || !photoUri}>
+        <Pressable style={[styles.button, (photoUris.length === 0 || saving) && { opacity: 0.7 }]} onPress={submit} disabled={saving || photoUris.length === 0}>
           <Text style={styles.buttonText}>{saving ? "Сохраняем..." : "Создать актив"}</Text>
         </Pressable>
       </ScrollView>
@@ -267,6 +283,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   photoButtonText: { color: colors.textPrimary, fontWeight: "600" },
+  photoGrid: { gap: 10 },
+  photoTile: { gap: 6 },
   photoPreview: {
     width: "100%",
     height: 220,
@@ -274,6 +292,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  removePhotoButton: {
+    alignSelf: "flex-end",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.surface,
+  },
+  removePhotoText: { color: colors.textPrimary, fontWeight: "600" },
   button: {
     marginTop: 8,
     backgroundColor: colors.accent,

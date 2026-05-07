@@ -206,12 +206,15 @@ export function InventoryScanScreen({ sessionId, onFinish, onExit }: Props) {
       setUploadingPhoto(true);
       const row = await ensureInventoryItem(found);
       const formData = new FormData();
+      formData.append("asset", String(found.id));
+      formData.append("session", String(sessionId));
+      formData.append("inventory_item", String(row.id));
       formData.append("photo", {
         uri: photo.uri,
         type: photo.type || "image/jpeg",
-        name: photo.fileName || `inventory-item-${row.id}.jpg`,
+        name: photo.fileName || `asset-${found.id}-${Date.now()}.jpg`,
       } as any);
-      await api.patch(`/inventory-items/${row.id}/`, formData, {
+      await api.post("/asset-photos/", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await loadData();
@@ -353,10 +356,10 @@ export function InventoryScanScreen({ sessionId, onFinish, onExit }: Props) {
             <Text style={styles.actionText}>{saving ? "Сохраняем..." : "Далее"}</Text>
           </Pressable>
           <Pressable style={[styles.photoButton, uploadingPhoto && { opacity: 0.7 }]} onPress={makePhoto} disabled={uploadingPhoto}>
-            <Text style={styles.photoText}>{uploadingPhoto ? "Загрузка..." : "Сделать фото"}</Text>
+            <Text style={styles.photoText}>{uploadingPhoto ? "Загрузка..." : "Добавить фото"}</Text>
           </Pressable>
         </View>
-        <Text style={styles.photoHint}>«Сделать фото» открывает камеру сразу. Закройте камеру без снимка, если фото не нужно.</Text>
+        <Text style={styles.photoHint}>Можно добавить несколько фото одного актива подряд. Закройте камеру без снимка, если фото не нужно.</Text>
       </ScrollView>
 
       <Modal visible={conditionPickerVisible} transparent animationType="fade" onRequestClose={() => setConditionPickerVisible(false)}>

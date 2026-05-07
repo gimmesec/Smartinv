@@ -1,9 +1,9 @@
 """
-Обучение головы ConvNeXt-Tiny на 5 классов состояния актива по фото.
+Обучение головы ConvNeXt-Tiny на фиксированные классы состояния актива по фото.
 
 Разметка: каталог CONDITION_TRAINING_DATA_DIR (см. settings / .env), по умолчанию рядом с manage.py:
   training_data/asset_condition/<slug>/
-Подпапки (slug класса): ok, wear, damage, severe, unclear.
+Подпапки (slug класса): см. inventory.ml.condition_classes.CLASS_SLUGS
 Внутри каждой — изображения (.jpg, .jpeg, .png, .webp, .bmp).
 
 Запуск из каталога с manage.py (обычно server/app):
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from collections import Counter
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -51,13 +52,32 @@ class _ImageListDataset:
 
 
 class Command(BaseCommand):
-    help = "Обучить ConvNeXt-Tiny (5 классов состояния) на фото из CONDITION_TRAINING_DATA_DIR"
+    help = "Обучить ConvNeXt-Tiny (фиксированные классы) на фото из CONDITION_TRAINING_DATA_DIR"
 
     def add_arguments(self, parser):
         parser.add_argument("--epochs", type=int, default=15)
         parser.add_argument("--batch-size", type=int, default=8)
         parser.add_argument("--lr", type=float, default=1e-4)
         parser.add_argument("--val-ratio", type=float, default=0.15, help="Доля валидации из каждого класса")
+        parser.add_argument(
+            "--balance",
+            type=str,
+            default="auto",
+            choices=("auto", "none", "sampler", "loss"),
+            help="Балансировка классов при дисбалансе: auto|none|sampler|loss.",
+        )
+        parser.add_argument(
+            "--imbalance-ratio",
+            type=float,
+            default=1.5,
+            help="Порог дисбаланса (max/min) для режима auto.",
+        )
+        parser.add_argument("--jitter", type=float, default=0.15, help="Интенсивность ColorJitter (0 = выключить).")
+        parser.add_argument("--rotation-deg", type=float, default=7.0, help="RandomRotation градусов (0 = выключить).")
+        parser.add_argument("--affine-deg", type=float, default=5.0, help="RandomAffine degrees (0 = выключить).")
+        parser.add_argument("--affine-translate", type=float, default=0.03, help="RandomAffine translate (0..1).")
+        parser.add_argument("--affine-scale", type=float, default=0.05, help="RandomAffine scale jitter (0..1).")
+        parser.add_argument("--erase-p", type=float, default=0.15, help="RandomErasing probability (0 = выключить).")
         parser.add_argument(
             "--data-dir",
             type=str,
@@ -121,12 +141,30 @@ class Command(BaseCommand):
 
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
+        aug: list = [transforms.RandomResizedCrop(224, scale=(0.8, 1.0)), transforms.RandomHorizontalFlip()]
+        jitter = float(options["jitter"])
+        if jitter > 0:
+            aug.append(transforms.ColorJitter(brightness=jitter, contrast=jitter, saturation=jitter))
+        rot = float(options["rotation_deg"])
+        if rot > 0:
+            aug.append(transforms.RandomRotation(degrees=rot))
+        affine_deg = float(options["affine_deg"])
+        if affine_deg > 0:
+            translate = float(options["affine_translate"])
+            scale = float(options["affine_scale"])
+            aug.append(
+                transforms.RandomAffine(
+                    degrees=affine_deg,
+                    translate=(translate, translate) if translate > 0 else None,
+                    scale=(max(0.1, 1.0 - scale), 1.0 + scale) if scale > 0 else None,
+                )
+            )
         train_tf = transforms.Compose(
             [
-                transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
-                transforms.RandomHorizontalFlip(),
+                *aug,
                 transforms.ToTensor(),
                 transforms.Normalize(mean, std),
+                transforms.RandomErasing(p=float(options["erase_p"])) if float(options["erase_p"]) > 0 else transforms.Lambda(lambda x: x),
             ]
         )
         val_tf = transforms.Compose(
@@ -141,10 +179,38 @@ class Command(BaseCommand):
         train_ds = _ImageListDataset(items, train_tf)
         val_ds = _ImageListDataset(val_items, val_tf) if val_items else None
 
+        # Балансировка классов (sampler или веса в loss)
+        labels = [y for _, y in items]
+        counts = Counter(labels)
+        min_c = min(counts.values()) if counts else 0
+        max_c = max(counts.values()) if counts else 0
+        ratio = (max_c / max(1, min_c)) if min_c else 1.0
+        balance_mode = str(options["balance"]).lower()
+        if balance_mode == "auto":
+            balance_mode = "sampler" if ratio >= float(options["imbalance_ratio"]) else "none"
+
+        sampler = None
+        class_weights_tensor = None
+        if balance_mode == "sampler" and counts:
+            # Вес каждого примера = 1 / частота класса
+            sample_weights = [1.0 / float(counts[y]) for y in labels]
+            sampler = torch.utils.data.WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+            self.stdout.write(self.style.NOTICE(f"Балансировка: sampler (imbalance_ratio={ratio:.2f})"))
+        elif balance_mode == "loss" and counts:
+            # Вес в loss = inv freq, нормализуем по среднему чтобы масштаб оставался привычным
+            inv = [1.0 / float(counts.get(i, 1)) for i in range(NUM_CONDITION_CLASSES)]
+            mean_inv = sum(inv) / max(1, len(inv))
+            inv = [x / mean_inv for x in inv]
+            class_weights_tensor = torch.tensor(inv, dtype=torch.float32)
+            self.stdout.write(self.style.NOTICE(f"Балансировка: loss weights (imbalance_ratio={ratio:.2f})"))
+        else:
+            self.stdout.write(self.style.NOTICE(f"Балансировка: none (imbalance_ratio={ratio:.2f})"))
+
         train_loader = DataLoader(
             train_ds,
             batch_size=int(options["batch_size"]),
-            shuffle=True,
+            shuffle=(sampler is None),
+            sampler=sampler,
             num_workers=0,
             pin_memory=False,
         )
@@ -167,7 +233,7 @@ class Command(BaseCommand):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device)
         opt = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=float(options["lr"]))
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights_tensor.to(device) if class_weights_tensor is not None else None)
 
         epochs = int(options["epochs"])
         self.stdout.write(self.style.NOTICE(f"Устройство: {device}; train={len(train_ds)} val={len(val_ds) if val_ds else 0}"))

@@ -21,6 +21,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -59,6 +60,17 @@ DATABASES = {
     }
 }
 
+# Safety: Postgres statement_timeout (ms). Helps avoid "hung" endpoints due to pathological queries.
+# 0 means disabled.
+_stmt_ms_raw = (os.getenv("POSTGRES_STATEMENT_TIMEOUT_MS", "") or "").strip()
+try:
+    POSTGRES_STATEMENT_TIMEOUT_MS = int(_stmt_ms_raw) if _stmt_ms_raw else 0
+except ValueError:
+    POSTGRES_STATEMENT_TIMEOUT_MS = 0
+if POSTGRES_STATEMENT_TIMEOUT_MS > 0:
+    DATABASES["default"].setdefault("OPTIONS", {})
+    DATABASES["default"]["OPTIONS"]["options"] = f"-c statement_timeout={POSTGRES_STATEMENT_TIMEOUT_MS}"
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -73,6 +85,7 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -124,7 +137,7 @@ GIGACHAT_API_BASE = os.getenv("GIGACHAT_API_BASE", "https://gigachat.devices.sbe
 GIGACHAT_MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat")
 GIGACHAT_VERIFY_SSL = _env_bool("GIGACHAT_VERIFY_SSL", True)
 
-# ConvNeXt: 5 классов состояния по фото. Веса после `python manage.py train_condition_classifier`.
+# ConvNeXt: 4 класса состояния по фото. Веса после `python manage.py train_condition_classifier`.
 CONDITION_CLASSIFIER_WEIGHTS = os.getenv(
     "CONDITION_CLASSIFIER_WEIGHTS",
     str(BASE_DIR / "weights" / "asset_condition_convnext.pt"),

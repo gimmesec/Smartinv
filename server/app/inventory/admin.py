@@ -60,11 +60,20 @@ class EmployeeAdmin(admin.ModelAdmin):
     autocomplete_fields = ("user",)
 
 
+class AssetPhotoInline(admin.TabularInline):
+    model = AssetPhoto
+    fields = ("photo", "session", "inventory_item", "created_at")
+    readonly_fields = ("created_at",)
+    extra = 3
+
+
 @admin.register(Asset)
 class AssetAdmin(admin.ModelAdmin):
     list_display = ("inventory_number", "name", "status", "legal_entity", "external_1c_id")
     list_filter = ("status", "legal_entity")
     search_fields = ("inventory_number", "name", "external_1c_id")
+    exclude = ("photo",)
+    inlines = (AssetPhotoInline,)
 
 
 @admin.register(AssetConditionJob)
@@ -79,6 +88,7 @@ class AssetConditionJobAdmin(admin.ModelAdmin):
 class InventorySessionAdmin(admin.ModelAdmin):
     list_display = ("id", "status", "legal_entity", "started_at", "finished_at", "conductors", "export_xml_link")
     list_filter = ("status", "legal_entity")
+    search_fields = ("id", "legal_entity__name", "external_1c_id")
     filter_horizontal = ("conducted_by_employees",)
 
     def get_urls(self):
@@ -118,6 +128,7 @@ class InventorySessionAdmin(admin.ModelAdmin):
 class InventoryItemAdmin(admin.ModelAdmin):
     list_display = ("id", "session", "asset", "condition", "scanned_at")
     list_filter = ("condition",)
+    search_fields = ("id", "asset__inventory_number", "asset__name", "detected_inventory_number")
 
 
 @admin.register(AssetPhoto)
