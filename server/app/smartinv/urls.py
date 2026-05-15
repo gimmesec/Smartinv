@@ -5,6 +5,10 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+admin.site.site_header = "SmartInv"
+admin.site.site_title = "SmartInv"
+admin.site.index_title = "Панель управления"
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include("inventory.urls")),
